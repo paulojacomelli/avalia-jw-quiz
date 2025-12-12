@@ -1,0 +1,7 @@
+{
+  "name": "JW Quiz Creator",
+  "description": "A specialized application to generate Bible quizzes based strictly on NWT and JW.org publications, featuring a clean card-based design.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
