@@ -170,8 +170,10 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                     type="button"
                     onMouseEnter={() => playSound('hover')}
                     onClick={() => setMode(opt.value)}
-                    className={`py-3 px-2 rounded-lg text-xs md:text-sm font-medium transition-colors ${
-                      mode === opt.value ? 'bg-jw-blue text-white shadow-lg' : 'bg-jw-hover text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
+                    className={`py-3 px-2 rounded-lg text-xs md:text-sm border transition-all ${
+                      mode === opt.value 
+                        ? 'bg-jw-blue text-white font-bold shadow-md border-transparent transform scale-[1.02]' 
+                        : 'border-gray-400 dark:border-gray-600 bg-jw-hover text-gray-600 dark:text-gray-300 hover:border-jw-blue'
                     }`}
                   >
                     {opt.label}
@@ -215,7 +217,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                 {DIFFICULTY_OPTIONS.map((opt) => (
                   <label key={opt.value} className="flex-1 cursor-pointer group" onMouseEnter={() => playSound('hover')}>
                     <input type="radio" name="difficulty" value={opt.value} checked={difficulty === opt.value} onChange={() => setDifficulty(opt.value)} className="sr-only" />
-                    <div className={`text-center py-2 rounded-lg text-sm border transition-all ${difficulty === opt.value ? 'border-jw-blue bg-jw-blue/10 text-jw-blue font-bold' : 'border-gray-400 dark:border-gray-600 bg-jw-hover text-gray-600 dark:text-gray-300 group-hover:border-jw-blue'}`}>
+                    <div className={`text-center py-2 rounded-lg text-sm border transition-all ${difficulty === opt.value ? 'bg-jw-blue text-white font-bold border-transparent shadow-md' : 'border-gray-400 dark:border-gray-600 bg-jw-hover text-gray-600 dark:text-gray-300 group-hover:border-jw-blue'}`}>
                       {opt.label}
                     </div>
                   </label>
@@ -230,7 +232,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                  {FORMAT_OPTIONS.map((opt) => (
                    <label key={opt.value} className="flex-1 cursor-pointer group" onMouseEnter={() => playSound('hover')}>
                      <input type="radio" name="quizFormat" value={opt.value} checked={quizFormat === opt.value} onChange={() => setQuizFormat(opt.value as QuizFormat)} className="sr-only" />
-                     <div className={`text-center py-2 rounded-lg text-sm border transition-all ${quizFormat === opt.value ? 'border-jw-blue bg-jw-blue/10 text-jw-blue font-bold' : 'border-gray-400 dark:border-gray-600 bg-jw-hover text-gray-600 dark:text-gray-300 group-hover:border-jw-blue'}`}>
+                     <div className={`text-center py-2 rounded-lg text-sm border transition-all ${quizFormat === opt.value ? 'bg-jw-blue text-white font-bold border-transparent shadow-md' : 'border-gray-400 dark:border-gray-600 bg-jw-hover text-gray-600 dark:text-gray-300 group-hover:border-jw-blue'}`}>
                        {opt.label}
                      </div>
                    </label>
@@ -366,12 +368,12 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                       onClick={() => toggleHintType(opt.value)}
                       className={`flex flex-col items-center justify-center p-2 rounded-lg border transition-all duration-200 aspect-square ${
                         isSelected
-                          ? 'bg-jw-blue/10 border-jw-blue text-jw-blue'
+                          ? 'bg-jw-blue text-white border-transparent shadow-md'
                           : 'bg-jw-hover border-transparent text-gray-500 dark:text-gray-400 hover:text-jw-text hover:border-gray-500'
                       }`}
                       title={opt.label}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-6 h-6 mb-1 ${isSelected ? 'text-jw-blue' : 'opacity-70'}`}>
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-6 h-6 mb-1 ${isSelected ? 'text-white' : 'opacity-70'}`}>
                         <path strokeLinecap="round" strokeLinejoin="round" d={opt.icon} />
                       </svg>
                       <span className="text-[10px] sm:text-xs font-medium truncate w-full text-center">{opt.label}</span>

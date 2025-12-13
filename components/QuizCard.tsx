@@ -85,6 +85,33 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     setIsRecording(false);
   }, [question.id]);
 
+  // Handle Keyboard Shortcuts (1-4, A-D)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input (Chat or Text Area)
+      const tagName = (e.target as HTMLElement).tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
+
+      // Ignore if interaction shouldn't happen
+      if (showAnswerKey || selectedOption !== null || isTimeUp || isSkipping || !isMultipleChoice) return;
+
+      const key = e.key.toLowerCase();
+      const mapping: Record<string, number> = {
+        '1': 0, 'a': 0,
+        '2': 1, 'b': 1,
+        '3': 2, 'c': 2,
+        '4': 3, 'd': 3
+      };
+
+      if (mapping[key] !== undefined && mapping[key] < question.options.length) {
+        handleSelect(mapping[key]);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAnswerKey, selectedOption, isTimeUp, isSkipping, isMultipleChoice, question.options.length]);
+
   // Handle MC Selection
   const handleSelect = (idx: number) => {
     if (showAnswerKey || selectedOption !== null || isTimeUp || isSkipping) return; 
@@ -565,7 +592,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
       {/* Contest Button (Only on Answer Key view) */}
       {showAnswerKey && onContest && (
         <div className="mt-6 pl-0 md:pl-8 border-t border-gray-700/30 pt-4 flex justify-end">
-          <button onClick={onContest} onMouseEnter={() => playSound('hover')} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors opacity-70 hover:opacity-100" title="Acha que esta pergunta está incorreta?">
+          <button onClick={(e) => { e.stopPropagation(); onContest && onContest(); }} type="button" onMouseEnter={() => playSound('hover')} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors opacity-70 hover:opacity-100" title="Acha que esta pergunta está incorreta?">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
             Contestar / Substituir
           </button>

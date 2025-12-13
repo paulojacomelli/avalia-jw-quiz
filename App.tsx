@@ -51,6 +51,9 @@ function App() {
 
   // History State
   const [questionHistory, setQuestionHistory] = useState<string[]>([]);
+  
+  // API Quota Cooldown State
+  const [cooldownTime, setCooldownTime] = useState(0);
 
   // Audio/TTS Refs
   const questionReadRef = useRef(false);
@@ -123,6 +126,17 @@ function App() {
     }
   }, [countdownValue, gameState]);
 
+  // Cooldown Timer Logic
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (cooldownTime > 0) {
+      interval = setInterval(() => {
+        setCooldownTime((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [cooldownTime]);
+
   // --- TTS Logic ---
   // Ensure we stop speech if TTS is disabled globally
   useEffect(() => {
@@ -135,7 +149,7 @@ function App() {
     // Check both global toggle and config specific toggle (autoRead)
     const shouldRead = ttsEnabled && quizConfig?.tts.enabled && quizConfig.tts.autoRead;
     
-    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping) {
+    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       const timeout = setTimeout(() => {
         const q = quizData.questions[currentQuestionIndex];
         const teamIntro = quizConfig?.isTeamMode ? `Pergunta para ${teams[currentTeamIndex].name}. ` : "";
@@ -157,7 +171,37 @@ function App() {
         stopSpeech();
       };
     }
-  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig]);
+  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime]);
+
+  // --- Keyboard Shortcuts (Spacebar to Next) ---
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // If pressing Space
+      if (e.code === 'Space') {
+        // Avoid scrolling/triggering if user is typing in a textarea/input
+        const tagName = (e.target as HTMLElement).tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
+        
+        // Prevent action if in cooldown
+        if (cooldownTime > 0) return;
+
+        e.preventDefault(); // Prevent page scroll
+
+        // Context-aware action
+        if (gameState === 'PLAYING' && isCurrentQuestionAnswered) {
+          handleNextQuestion();
+        } else if (gameState === 'ROUND_SUMMARY') {
+          handleNextRound();
+        } else if (isReviewing && reviewIndex < (quizData?.questions.length || 0) - 1) {
+           setReviewIndex(prev => prev + 1);
+           playSound('click');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [gameState, isCurrentQuestionAnswered, isReviewing, reviewIndex, quizData, currentQuestionIndex, cooldownTime]);
 
   const handleSoundToggle = () => {
     const newState = !soundEnabled;
@@ -185,6 +229,20 @@ function App() {
     localStorage.setItem('jw-quiz-history', JSON.stringify(updated));
   };
 
+  // Centralized Error Handling for API Calls
+  const handleApiError = (err: any) => {
+    const msg = err?.message || String(err);
+    console.error("API Error:", msg);
+    
+    // Check for Quota Exceeded (429) or specific text
+    if (msg.includes('quota') || msg.includes('429') || msg.includes('exceeded')) {
+      setCooldownTime(60); // Set 60 seconds cooldown
+      stopSpeech();
+    } else {
+      setError("Ocorreu um erro ao conectar com a IA. Verifique sua internet ou tente novamente.");
+    }
+  };
+
   const handleGenerate = async (config: QuizConfig) => {
     // Ensure the generated config respects the current global TTS state
     const finalConfig = {
@@ -201,6 +259,7 @@ function App() {
     setQuizConfig(finalConfig);
     setTimeLimit(finalConfig.timeLimit);
     setHintsRemaining(finalConfig.maxHints);
+    setCooldownTime(0);
     
     if (finalConfig.isTeamMode) {
       setTeams(finalConfig.teams.map((name, idx) => ({
@@ -231,9 +290,7 @@ function App() {
 
       startCountdownSequence(finalConfig.timeLimit);
     } catch (err: any) {
-      console.error(err);
-      setError("Não foi possível gerar o quiz. Por favor, verifique sua conexão ou tente novamente.");
-      setLoading(false);
+      handleApiError(err);
     } finally {
       setLoading(false); 
     }
@@ -270,7 +327,7 @@ function App() {
 
     let interval: ReturnType<typeof setInterval>;
     
-    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping) {
+    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -280,13 +337,13 @@ function App() {
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping) {
+    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       if (quizConfig?.enableTimerSound) playSound('timeUp');
       handleAnswer({ score: 0, isCorrect: false });
     }
 
     return () => clearInterval(interval);
-  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping]);
+  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime]);
 
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
     stopSpeech();
@@ -372,11 +429,12 @@ function App() {
       resetTimer();
       setIsCurrentQuestionAnswered(false);
       
-    } catch (e) {
-      console.error("Failed to skip", e);
-      alert("Não foi possível pular a pergunta no momento.");
-    } finally {
+    } catch (e: any) {
+      handleApiError(e);
+      // If quota exceeded, we stop skipping state, otherwise allow retry
       setIsSkipping(false);
+    } finally {
+      if (cooldownTime === 0) setIsSkipping(false);
     }
   };
 
@@ -434,6 +492,9 @@ function App() {
       const oldQuestion = quizData.questions[indexToContest];
       const newQuestion = await generateReplacementQuestion(quizConfig, oldQuestion.question);
       
+      // Force unique ID to ensure React remounts the component even if Gemini returns similar ID
+      newQuestion.id = `sub-${Date.now()}`;
+      
       const newQuestions = [...quizData.questions];
       newQuestions[indexToContest] = newQuestion;
       setQuizData({ ...quizData, questions: newQuestions });
@@ -447,9 +508,8 @@ function App() {
 
       updateHistory([newQuestion.question]);
       
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao substituir pergunta. Verifique sua conexão.");
+    } catch (err: any) {
+      handleApiError(err);
     } finally {
       setLoading(false);
     }
@@ -462,6 +522,7 @@ function App() {
     setGameState('SETUP');
     setIsReviewing(false);
     setIsSkipping(false);
+    setCooldownTime(0);
   };
 
   const getTimerStyles = () => {
@@ -483,6 +544,39 @@ function App() {
           <p className="text-sm opacity-50 mt-2">Consultando as Escrituras e publicações...</p>
        </div>
      )
+  }
+
+  // Quota Exceeded Full Screen Timer
+  if (cooldownTime > 0) {
+    return (
+      <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in">
+        <div className="bg-jw-card border border-red-500/30 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-red-500"></div>
+          
+          <div className="w-20 h-20 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-red-400">
+               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+             </svg>
+          </div>
+
+          <h2 className="text-2xl font-bold mb-2 text-white">Limite de Uso da IA Atingido</h2>
+          <p className="text-gray-400 mb-8 text-sm">
+            Muitas requisições foram feitas em pouco tempo. O sistema precisa de uma pausa para restabelecer a conexão.
+          </p>
+
+          <div className="text-6xl font-mono font-bold text-jw-blue mb-8 tabular-nums">
+             {cooldownTime}s
+          </div>
+
+          <button 
+            onClick={() => setCooldownTime(0)} 
+            className="text-sm text-gray-500 hover:text-white underline transition-colors"
+          >
+            Cancelar e Voltar ao Início
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (gameState === 'COUNTDOWN') {

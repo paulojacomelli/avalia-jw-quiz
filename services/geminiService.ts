@@ -25,7 +25,7 @@ const getTopicPrompt = (config: QuizConfig) => {
     case TopicMode.GENERAL:
       return "Temas variados sobre a Bíblia e vida cristã (Conhecimento Exato).";
     case TopicMode.HISTORY:
-      return "História Bíblica e, especificamente, acontecimentos relacionados à História Moderna das Testemunhas de Jeová (do passado aos dias atuais). Baseie-se EXCLUSIVAMENTE em informações disponíveis no site jw.org (Anuários, Proclamadores, etc). Não use fontes seculares externas.";
+      return "História Moderna das Testemunhas de Jeová e o desenvolvimento da sua organização terrestre. IMPORTANTE: NÃO inclua perguntas de história bíblica geral (como reis de Israel, apóstolos ou profetas antigos), exceto se for sobre a interpretação profética moderna deles. Foque EXCLUSIVAMENTE em: Datas importantes (ex: 1879, 1914, 1919), Congressos históricos, Biografias de irmãos da história moderna (ex: C.T. Russell, J.F. Rutherford, N.H. Knorr), Lançamento de publicações importantes, Batalhas jurídicas, Construção de Betéis e Expansão da obra mundial. Fonte exclusiva: jw.org (Livro Proclamadores, Anuários, Fé em Ação).";
     case TopicMode.SPECIFIC:
       return `Assunto Específico: "${config.specificTopic}". Crie perguntas EXCLUSIVAMENTE focadas neste tema ou assunto. Se o assunto for uma pessoa, lugar ou evento, explore detalhes bíblicos sobre isso.`;
     case TopicMode.BOOK:
@@ -271,7 +271,8 @@ export const askAiAboutQuestion = async (question: QuizQuestion, userQuery: stri
   const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
-    O usuário está com dúvidas sobre a seguinte questão de um quiz bíblico (Testemunhas de Jeová):
+    O usuário está com dúvidas sobre a seguinte questão de um quiz bíblico (Testemunhas de Jeová).
+    Esta questão refere-se a: ${question.reference}.
     
     Pergunta: "${question.question}"
     Alternativas: ${JSON.stringify(question.options)}
@@ -283,7 +284,7 @@ export const askAiAboutQuestion = async (question: QuizQuestion, userQuery: stri
 
     Sua tarefa:
     1. Aja como um instrutor amigável e socrático.
-    2. Responda à dúvida do usuário. Se ele estiver contestando a resposta, explique com base na Bíblia ou lógica das publicações.
+    2. Responda à dúvida do usuário baseando-se no entendimento oficial da organização.
     3. Seja breve (máximo 2 ou 3 frases).
     4. Mantenha um tom calmo e educativo.
   `;
