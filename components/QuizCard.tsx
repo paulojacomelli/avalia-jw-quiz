@@ -22,6 +22,8 @@ interface QuizCardProps {
   allowStandardHint?: boolean;
   onSkip?: () => void;
   isSkipping?: boolean;
+  onVoid?: () => void;
+  isVoided?: boolean;
 }
 
 export const QuizCard: React.FC<QuizCardProps> = ({ 
@@ -41,6 +43,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   allowStandardHint = true,
   onSkip,
   isSkipping = false,
+  onVoid,
+  isVoided = false,
 }) => {
   // State for MC/TF
   const [internalSelectedOption, setInternalSelectedOption] = useState<number | null>(null);
@@ -293,15 +297,25 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col h-full justify-center relative p-2 md:p-0">
       
+      {/* Voided Overlay */}
+      {isVoided && (
+         <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl animate-fade-in pointer-events-none">
+            <div className="bg-red-600/90 text-white px-8 py-4 rounded-lg shadow-2xl border border-red-400 transform -rotate-2">
+               <h2 className="text-2xl font-black uppercase tracking-widest border-2 border-white p-2">Questão Anulada</h2>
+               <p className="text-center text-sm font-medium mt-1">Ponto Atribuído</p>
+            </div>
+         </div>
+      )}
+
       {/* Team Banner */}
       {activeTeamName && !showAnswerKey && (
-        <div className="mb-4 inline-block self-start bg-jw-blue/10 border border-jw-blue text-jw-blue px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider animate-fade-in">
+        <div className="mb-4 inline-block self-start bg-jw-blue text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider animate-fade-in shadow-sm">
           Vez de: {activeTeamName}
         </div>
       )}
 
       {/* Question Header */}
-      <div className="mb-6 flex items-start gap-4 group/header">
+      <div className="mb-6 flex items-start gap-4 group/header relative z-10">
         <span className="font-mono mt-1 text-sm opacity-50">{index + 1}.</span>
         <div className="flex-1">
           <h3 className="text-lg md:text-2xl font-medium text-jw-text leading-relaxed">
@@ -331,7 +345,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
       </div>
 
       {/* CONTENT AREA */}
-      <div className="pl-0 md:pl-8 min-h-[150px]">
+      <div className="pl-0 md:pl-8 min-h-[150px] relative z-10">
         {isMultipleChoice ? (
           <div className="space-y-4">
             <div className="space-y-3">
@@ -341,11 +355,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                   onClick={() => handleSelect(idx)}
                   onMouseEnter={() => !hasConfirmed && !isTimeUp && !isSkipping && internalSelectedOption !== idx && playSound('hover')}
                   className={getOptionStyle(idx)}
-                  disabled={isAnsweredOrFinished || isSkipping}
+                  disabled={isAnsweredOrFinished || isSkipping || isVoided}
                 >
                   <span className={`w-8 h-8 rounded-md flex items-center justify-center text-sm mr-3 md:mr-4 shrink-0 transition-colors ${
                     (internalSelectedOption === idx || (showAnswerKey && idx === question.correctAnswerIndex))
-                      ? 'bg-jw-text text-jw-dark' 
+                      ? 'bg-white text-jw-blue' 
                       : 'bg-gray-700/50 group-hover:bg-jw-text group-hover:text-jw-dark'
                   }`}>
                     {String.fromCharCode(65 + idx)}
@@ -431,7 +445,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
       {/* RESULTS SECTION */}
       {isAnsweredOrFinished && !showAnswerKey && (
-         <div className="pl-0 md:pl-8 mt-6 animate-fade-in space-y-4">
+         <div className="pl-0 md:pl-8 mt-6 animate-fade-in space-y-4 relative z-10">
            {isMultipleChoice && (
              <p className={`text-sm font-medium ${selectedOption === question.correctAnswerIndex ? 'text-green-400' : 'text-red-400'}`}>
                {isTimeUp && selectedOption === null ? 'Tempo Esgotado' : (selectedOption === question.correctAnswerIndex ? 'Resposta Correta' : 'Resposta Incorreta')}
@@ -457,7 +471,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
       
       {/* ACTIONS & HINTS SECTION */}
       {!isAnsweredOrFinished && (
-        <div className="pl-0 md:pl-8 mt-6">
+        <div className="pl-0 md:pl-8 mt-6 relative z-10">
           <div className="flex items-center gap-2 md:gap-4 flex-wrap">
             
             {/* Help Button (Context Aware) */}
@@ -537,7 +551,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
       {/* Chat Interface */}
       {showAskAi && (
-        <div className="w-full mt-4 bg-jw-hover/50 p-4 rounded-lg border border-gray-700/50 animate-fade-in relative pl-0 md:pl-8">
+        <div className="w-full mt-4 bg-jw-hover/50 p-4 rounded-lg border border-gray-700/50 animate-fade-in relative pl-0 md:pl-8 z-10">
             <button 
               onClick={() => { setShowAskAi(false); setAskResponse(null); }} 
               className="absolute top-2 right-2 opacity-50 hover:opacity-100 p-1"
@@ -583,6 +597,20 @@ export const QuizCard: React.FC<QuizCardProps> = ({
               </div>
             )}
         </div>
+      )}
+
+      {/* Review Mode Actions (Bottom) */}
+      {showAnswerKey && onVoid && !isVoided && (
+         <div className="mt-8 pt-4 border-t border-gray-700/30 flex justify-end relative z-20">
+            <button 
+               onClick={onVoid}
+               className="text-jw-blue hover:text-white hover:bg-jw-blue border border-jw-blue/50 text-sm font-bold flex items-center gap-2 px-4 py-2 rounded-full transition-all"
+               title="Gerar uma nova pergunta para tentar responder novamente"
+            >
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+               Substituir por Nova Pergunta
+            </button>
+         </div>
       )}
     </div>
   );

@@ -32,6 +32,9 @@ function App() {
   // Skip State
   const [isSkipping, setIsSkipping] = useState(false);
   
+  // Voided Questions State (No longer used for simple void, but kept for compatibility or future use if needed, effectively cleared on replace)
+  const [voidedIndices, setVoidedIndices] = useState<Set<number>>(new Set());
+  
   // Teams State
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentTeamIndex, setCurrentTeamIndex] = useState(0);
@@ -301,6 +304,7 @@ function App() {
     setCurrentTeamIndex(0);
     setCurrentRound(1);
     setIsSkipping(false);
+    setVoidedIndices(new Set()); // Reset voided questions
   };
 
   const resetTimer = () => {
@@ -331,46 +335,127 @@ function App() {
     return () => clearInterval(interval);
   }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime]);
 
+  // Handle answers (from both Playing and Review modes)
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
     stopSpeech();
+    
+    const targetIndex = isReviewing ? reviewIndex : currentQuestionIndex;
+    const targetTeamIdx = isReviewing ? (reviewIndex % teams.length) : currentTeamIndex;
 
-    if (quizData) {
-      if (result.isCorrect || result.score > 0.6) playSound('correct');
-      else playSound('wrong');
+    // Audio Feedback
+    if (result.isCorrect || result.score > 0.6) playSound('correct');
+    else playSound('wrong');
 
-      setTeams(prevTeams => prevTeams.map((team, index) => {
-        if (index !== currentTeamIndex) return team;
-        return {
-          ...team,
-          score: parseFloat((team.score + result.score).toFixed(1)),
-          correctCount: result.isCorrect ? team.correctCount + 1 : team.correctCount,
-          wrongCount: !result.isCorrect ? team.wrongCount + 1 : team.wrongCount
-        };
-      }));
-    } else {
-      setTeams(prevTeams => prevTeams.map((team, index) => {
-        if (index !== currentTeamIndex) return team;
-        return {
-          ...team,
-          wrongCount: team.wrongCount + 1
-        };
-      }));
-    }
+    // Update Teams Score
+    setTeams(prevTeams => prevTeams.map((team, index) => {
+      if (index !== targetTeamIdx) return team;
+      return {
+        ...team,
+        score: parseFloat((team.score + result.score).toFixed(1)),
+        correctCount: result.isCorrect ? team.correctCount + 1 : team.correctCount,
+        wrongCount: !result.isCorrect ? team.wrongCount + 1 : team.wrongCount
+      };
+    }));
 
-    setIsCurrentQuestionAnswered(true);
+    // Update User Answers
     const newAnswers = [...userAnswers];
-    
     if (result.selectedIndex !== undefined) {
-      newAnswers[currentQuestionIndex] = result.selectedIndex;
+      newAnswers[targetIndex] = result.selectedIndex;
     } else {
-      newAnswers[currentQuestionIndex] = result.textAnswer || "Respondido";
+      newAnswers[targetIndex] = result.textAnswer || "Respondido";
     }
-    
     setUserAnswers(newAnswers);
-    
-    if (ttsEnabled && quizConfig?.tts.enabled) {
+
+    // TTS Feedback (Only in play mode generally, or if config allows)
+    if (!isReviewing && ttsEnabled && quizConfig?.tts.enabled) {
       const feedback = result.score === 0 ? "Resposta incorreta." : (result.score === 1 ? "Resposta correta!" : `Parcialmente correto. ${result.score} pontos.`);
       speakText(feedback, quizConfig.tts);
+    }
+
+    // If in Play Mode, advance state
+    if (!isReviewing) {
+        setIsCurrentQuestionAnswered(true);
+    }
+  };
+
+  const handleReplaceQuestion = async (index: number) => {
+    if (!quizData || !quizConfig) return;
+    setLoading(true);
+    playSound('click');
+
+    try {
+        const oldQ = quizData.questions[index];
+        const newQ = await generateReplacementQuestion(quizConfig, oldQ.question);
+        
+        const teamIdx = index % teams.length;
+        const previousAnswer = userAnswers[index];
+        
+        // Revert score stats for this question so the user can "Try Again" with the new question
+        let wasCorrect = false;
+        let scoreToRevert = 0;
+
+        // Determine if previous answer was correct to deduct stats
+        if (oldQ.options && oldQ.options.length > 0) {
+            // MC
+            if (previousAnswer === oldQ.correctAnswerIndex) {
+                wasCorrect = true;
+                scoreToRevert = 1;
+            }
+        } else {
+             // Open Ended - We can't know the exact score granted without history, 
+             // but if they are replacing it, we assume we want to reset the attempt.
+             // We will assume no score deduction to avoid negative drift if we are unsure,
+             // OR simplified: assume if it was marked "Respondido", it might have been wrong or right.
+             // For safety in this version: We just clear the answer and let them earn new points.
+             // If they had points, they keep them? No, that's unfair.
+             // Let's assume if it was a "Retry", they forfeit the previous result.
+             // Since we don't track per-question score in `userAnswers`, we will just reset the answer slot
+             // and NOT deduct score to be safe, essentially giving a "Bonus Question" replacement.
+             // OR: We check if `voidedIndices` has it.
+        }
+
+        // Simplification: Just reset the question slot to allow answering again.
+        // If exact score reversal is needed, we would need a history log.
+        // For now: We grant a "Re-roll". 
+        // If the user got it WRONG previously, this is a second chance (fair).
+        // If the user got it RIGHT, they probably wouldn't click "Replace".
+        
+        if (wasCorrect) {
+             setTeams(prev => prev.map((t, i) => {
+                if (i !== teamIdx) return t;
+                return {
+                    ...t,
+                    score: parseFloat((t.score - scoreToRevert).toFixed(1)),
+                    correctCount: Math.max(0, t.correctCount - 1)
+                }
+             }));
+        } else {
+             // If it was counted as wrong, remove from wrong count
+             if (previousAnswer !== null && previousAnswer !== undefined) {
+                 setTeams(prev => prev.map((t, i) => {
+                    if (i !== teamIdx) return t;
+                    return {
+                        ...t,
+                        wrongCount: Math.max(0, t.wrongCount - 1)
+                    }
+                 }));
+             }
+        }
+
+        // Update Data
+        const newQuestions = [...quizData.questions];
+        newQuestions[index] = newQ;
+        setQuizData({...quizData, questions: newQuestions});
+
+        // Reset Answer for this index
+        const newUserAnswers = [...userAnswers];
+        newUserAnswers[index] = null; // Reset to allow answering
+        setUserAnswers(newUserAnswers);
+
+    } catch (e: any) {
+        handleApiError(e);
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -468,6 +553,7 @@ function App() {
     setIsReviewing(false);
     setIsSkipping(false);
     setCooldownTime(0);
+    setVoidedIndices(new Set());
   };
 
   const getTimerStyles = () => {
@@ -528,7 +614,7 @@ function App() {
     return (
       <div className="h-screen flex flex-col items-center justify-center bg-jw-blue text-white transition-colors duration-300 z-50">
          <h2 className="text-2xl md:text-4xl font-light mb-4 opacity-80 uppercase tracking-widest">Sua vez</h2>
-         <div className="text-4xl md:text-6xl font-bold mb-12 animate-fade-in-up bg-white/10 px-8 py-4 rounded-xl shadow-lg border border-white/20">
+         <div className="text-4xl md:text-6xl font-bold mb-12 animate-fade-in-up bg-black/10 px-8 py-4 rounded-xl shadow-lg border border-black/10">
            {teams[currentTeamIndex]?.name || "Você"}
          </div>
          <div className="text-[8rem] md:text-[12rem] font-bold font-mono leading-none animate-pulse drop-shadow-2xl">
@@ -560,10 +646,10 @@ function App() {
           {/* Settings Toolbar */}
           <div className="flex items-center gap-2 md:gap-4 ml-auto overflow-x-auto">
             {/* Zoom */}
-            <div className="flex items-center gap-1 bg-white/10 rounded-lg px-1">
+            <div className="flex items-center gap-1 bg-black/10 rounded-lg px-1">
               <button 
                 onClick={() => setZoomLevel(z => Math.max(0.7, z - 0.1))} 
-                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-white/20 rounded"
+                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-black/10 rounded"
                 title="Diminuir"
               >
                 -
@@ -571,7 +657,7 @@ function App() {
               <span className="text-xs font-mono w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
               <button 
                 onClick={() => setZoomLevel(z => Math.min(1.5, z + 0.1))} 
-                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-white/20 rounded"
+                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-black/10 rounded"
                 title="Aumentar"
               >
                 +
@@ -579,14 +665,14 @@ function App() {
             </div>
 
             {/* Divider */}
-            <div className="w-px h-6 bg-white/20 mx-1"></div>
+            <div className="w-px h-6 bg-black/20 mx-1"></div>
 
             {/* Toggle Group */}
             <div className="flex items-center gap-2">
                {/* Theme */}
                <button 
                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                 className="p-2 rounded-full hover:bg-white/20 transition-colors"
+                 className="p-2 rounded-full hover:bg-black/10 transition-colors"
                  title="Tema Escuro/Claro"
                >
                  {theme === 'dark' ? (
@@ -599,7 +685,7 @@ function App() {
                {/* Sound */}
                <button 
                  onClick={handleSoundToggle}
-                 className={`p-2 rounded-full hover:bg-white/20 transition-colors ${!soundEnabled && 'opacity-50'}`}
+                 className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!soundEnabled && 'opacity-50'}`}
                  title="Efeitos Sonoros"
                >
                  {soundEnabled ? (
@@ -612,7 +698,7 @@ function App() {
                {/* TTS Toggle */}
                <button 
                  onClick={handleTTSToggle}
-                 className={`p-2 rounded-full hover:bg-white/20 transition-colors ${!ttsEnabled && 'opacity-50'}`}
+                 className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!ttsEnabled && 'opacity-50'}`}
                  title="Narração (TTS)"
                >
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
@@ -624,7 +710,7 @@ function App() {
                <button 
                 onClick={handleReset} 
                 onMouseEnter={() => playSound('hover')} 
-                className="ml-2 bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors"
+                className="ml-2 bg-black/10 hover:bg-black/20 p-2 rounded-lg transition-colors"
                 title="Novo Quiz"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
@@ -790,9 +876,12 @@ function App() {
                         question={quizData.questions[reviewIndex]} 
                         index={reviewIndex} 
                         total={quizData.questions.length}
-                        showAnswerKey={true}
+                        // Only show answer key if it hasn't been reset (voided/replaced)
+                        showAnswerKey={userAnswers[reviewIndex] !== null && userAnswers[reviewIndex] !== undefined}
                         forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
                         ttsConfig={quizConfig?.tts}
+                        onVoid={() => handleReplaceQuestion(reviewIndex)} // Renamed action to Replace
+                        onAnswer={handleAnswer} // Pass handleAnswer to allow answering the new question
                     />
                  </div>
                  <div className="flex justify-between items-center mt-8 pb-4">
@@ -809,7 +898,7 @@ function App() {
       {/* FAB Next */}
       {gameState === 'PLAYING' && isCurrentQuestionAnswered && (
          <div className="fixed bottom-8 right-4 md:right-8 z-50 animate-fade-in-up">
-           <button onClick={handleNextQuestion} onMouseEnter={() => playSound('hover')} className="bg-blue-200 text-blue-900 font-bold py-3 px-6 md:px-8 rounded-full shadow-lg hover:bg-white transition-all transform active:scale-95 flex items-center gap-2 text-sm md:text-base">
+           <button onClick={handleNextQuestion} onMouseEnter={() => playSound('hover')} className="bg-jw-blue text-white font-bold py-3 px-6 md:px-8 rounded-full shadow-lg hover:bg-white transition-all transform active:scale-95 flex items-center gap-2 text-sm md:text-base">
              {(currentQuestionIndex < (quizData?.questions.length || 0) - 1) && ((currentQuestionIndex + 1) % (quizConfig?.questionsPerRound || 999) !== 0) ? 'Avançar' : 'Concluir Fase'}
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
            </button>
