@@ -1,6 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizConfig, TopicMode, GeneratedQuiz, QuizQuestion, HintType, QuizFormat, EvaluationResult } from "../types";
 
+// Utility to strip markdown code blocks if present
+const cleanJson = (text: string): string => {
+  if (!text) return "";
+  // Remove ```json ... ``` or ``` ... ```
+  return text.replace(/```json\n?|\n?```/g, '').replace(/```\n?|\n?```/g, '').trim();
+};
+
 const getSystemInstruction = () => `
 Você é um instrutor bíblico experiente, especializado exclusivamente nas publicações oficiais das Testemunhas de Jeová (site jw.org) e na Tradução do Novo Mundo das Escrituras Sagradas (TNM).
 
@@ -11,7 +18,7 @@ DIRETRIZES RÍGIDAS:
 4. Tom: Respeitoso, encorajador, sério e profissional.
 5. Formato: Gere estritamente JSON.
 6. Idioma: Português (Brasil).
-7. Dicas (Hints): As dicas devem ser amigáveis e sutis. Devem ajudar a memória do usuário sem entregar a resposta de bandeja e sem exigir que ele vá pesquisar em uma publicação.
+7. Dicas (Hints): As dicas devem ser EXTREMAMENTE CONCISAS e DIRETAS (máximo 1 frase curta). Elas devem ajudar o usuário a lembrar da resposta sem dá-la de bandeja.
 8. Explicação (Explanation): Ao justificar a resposta, seja breve, lógico e use o texto bíblico ou o raciocínio da publicação como base.
 
 INSTRUÇÕES DE DIFICULDADE:
@@ -61,36 +68,7 @@ const getFormatInstruction = (config: QuizConfig) => {
   }
 };
 
-const getHintStyleInstruction = (hintTypes: HintType[]) => {
-  // Description map
-  const descriptions: Record<HintType, string> = {
-    [HintType.ASK_AI]: "N/A (Gerado dinamicamente)",
-    [HintType.CONTEXT]: "Contexto (descreva a situação/cenário)",
-    [HintType.LOCATION]: "Localização (pistas geográficas)",
-    [HintType.TEMPORAL]: "Temporal (época, ano, sequência)",
-    [HintType.ASSOCIATION]: "Associação (relacione com outro fato conhecido)",
-    [HintType.ELIMINATION]: "Eliminação (diga o que NÃO é)",
-    [HintType.KEYWORD]: "Palavra-chave (termo específico do texto)",
-    [HintType.CHARACTER]: "Personagem (características de alguém envolvido)",
-    [HintType.COMPARISON]: "Comparação (contraste com outro evento)",
-    [HintType.RANDOM]: "Misto (qualquer estilo)"
-  };
-
-  const validTypes = hintTypes.filter(t => t !== HintType.ASK_AI);
-
-  if (!validTypes || validTypes.length === 0 || (validTypes.length === 1 && validTypes[0] === HintType.RANDOM)) {
-    return "Use uma variedade de estilos de dicas (contexto, palavra-chave, associação, etc) de forma imprevisível.";
-  }
-
-  const selectedDescriptions = validTypes
-    .filter(t => t !== HintType.RANDOM)
-    .map(t => `- ${descriptions[t]}`)
-    .join("\n");
-
-  return `Para cada pergunta, escolha ALEATORIAMENTE um dos seguintes estilos de dica (e apenas estes):\n${selectedDescriptions}`;
-};
-
-export const generateQuizContent = async (config: QuizConfig, historyToAvoid: string[] = []): Promise<GeneratedQuiz> => {
+export const generateQuizContent = async (config: QuizConfig): Promise<GeneratedQuiz> => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
     throw new Error("Chave de API não encontrada.");
@@ -98,27 +76,19 @@ export const generateQuizContent = async (config: QuizConfig, historyToAvoid: st
 
   const ai = new GoogleGenAI({ apiKey });
   const topicPrompt = getTopicPrompt(config);
-  const hintInstruction = getHintStyleInstruction(config.hintTypes);
   const formatInstruction = getFormatInstruction(config);
   
-  // Format history for prompt, limiting length to avoid token limits
-  const avoidPrompt = historyToAvoid.length > 0
-    ? `IMPORTANTE - EVITE REPETIR AS SEGUINTES PERGUNTAS JÁ FEITAS: ${historyToAvoid.slice(-50).join('; ')}.`
-    : '';
-
   const prompt = `
     Crie um quiz com ${config.count} perguntas.
     Tema: ${topicPrompt}.
     Dificuldade: ${config.difficulty}.
     ${formatInstruction}
-    ${avoidPrompt}
     
     Para cada pergunta:
     1. Siga o formato estipulado acima.
     2. Forneça uma referência bíblica ou de publicação que prove a resposta (ex: "Salmo 83:18" ou "w22.05 p.10").
     3. Forneça uma EXPLICAÇÃO curta (justificativa) de por que a resposta correta é a certa.
-    4. Forneça uma DICA (hint) curta e amigável.
-       ESTILO DA DICA OBRIGATÓRIO: ${hintInstruction}
+    4. Forneça uma DICA (hint) CURTA e CONCISA. O próprio sistema deve identificar automaticamente qual o melhor tipo de dica (contexto, palavra-chave, localização, etc) para a pergunta e fornecê-la diretamente.
   `;
 
   const response = await ai.models.generateContent({
@@ -161,7 +131,13 @@ export const generateQuizContent = async (config: QuizConfig, historyToAvoid: st
   const text = response.text;
   if (!text) throw new Error("Falha ao gerar conteúdo.");
 
-  return JSON.parse(text) as GeneratedQuiz;
+  // Clean and parse
+  try {
+    return JSON.parse(cleanJson(text)) as GeneratedQuiz;
+  } catch (e) {
+    console.error("JSON Parse Error:", text);
+    throw new Error("Erro ao processar resposta da IA.");
+  }
 };
 
 export const generateReplacementQuestion = async (config: QuizConfig, avoidQuestionText: string): Promise<QuizQuestion> => {
@@ -170,7 +146,6 @@ export const generateReplacementQuestion = async (config: QuizConfig, avoidQuest
 
   const ai = new GoogleGenAI({ apiKey });
   const topicPrompt = getTopicPrompt(config);
-  const hintInstruction = getHintStyleInstruction(config.hintTypes);
   const formatInstruction = getFormatInstruction(config);
 
   const prompt = `
@@ -186,7 +161,7 @@ export const generateReplacementQuestion = async (config: QuizConfig, avoidQuest
     3. Índice da correta (-1 se livre).
     4. Referência.
     5. Explicação (Justificativa).
-    6. Dica amigável (${hintInstruction}).
+    6. Dica CURTA e CONCISA (O sistema escolhe o melhor tipo de dica para o contexto).
   `;
 
   const response = await ai.models.generateContent({
@@ -215,7 +190,15 @@ export const generateReplacementQuestion = async (config: QuizConfig, avoidQuest
   const text = response.text;
   if (!text) throw new Error("Falha ao gerar pergunta substituta.");
 
-  return JSON.parse(text) as QuizQuestion;
+  try {
+    const question = JSON.parse(cleanJson(text)) as QuizQuestion;
+    // Overwrite the ID to ensure uniqueness, forcing React to re-mount components
+    question.id = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    return question;
+  } catch (e) {
+    console.error("JSON Parse Error:", text);
+    throw new Error("Erro ao processar substituição.");
+  }
 };
 
 // Evaluate user's free text response
@@ -260,7 +243,12 @@ export const evaluateFreeResponse = async (question: string, modelAnswer: string
 
   const text = response.text;
   if (!text) return { score: 0, feedback: "Erro na avaliação.", isCorrect: false };
-  return JSON.parse(text) as EvaluationResult;
+  
+  try {
+    return JSON.parse(cleanJson(text)) as EvaluationResult;
+  } catch(e) {
+    return { score: 0, feedback: "Erro ao ler avaliação.", isCorrect: false };
+  }
 };
 
 // New function for Strategic AI Hint
@@ -295,35 +283,4 @@ export const askAiAboutQuestion = async (question: QuizQuestion, userQuery: stri
   });
 
   return response.text || "Desculpe, não consegui formular uma resposta agora.";
-};
-
-// Generate specific hint type on demand
-export const generateHintByType = async (question: QuizQuestion, hintType: HintType): Promise<string> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chave de API não encontrada.");
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `
-    Preciso de uma dica específica para esta pergunta de quiz bíblico (JW.org):
-    
-    Pergunta: "${question.question}"
-    Resposta Correta: ${question.correctAnswerText || question.options[question.correctAnswerIndex]}
-    
-    Gere uma dica do tipo: "${hintType}".
-    
-    Diretrizes:
-    1. NÃO DÊ A RESPOSTA.
-    2. Se o tipo for "Localização", fale sobre geografia.
-    3. Se for "Palavra-Chave", destaque um termo grego/hebraico ou termo chave do versículo.
-    4. Se for "Contexto", explique o que estava acontecendo na época.
-    5. Seja breve (1 parágrafo curto).
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-  });
-
-  return response.text || "Dica não disponível no momento.";
 };

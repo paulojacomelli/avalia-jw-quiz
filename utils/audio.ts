@@ -5,19 +5,86 @@ const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
 let ctx: AudioContext | null = null;
 let isSoundEnabled = true;
 
+// Variable for loading beat interval
+let loadingInterval: any = null;
+
 const getContext = () => {
   if (!ctx) ctx = new AudioContext();
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
+
+export const resumeAudioContext = () => {
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(err => console.warn(err));
+  } else if (!ctx) {
+    getContext();
+  }
+};
 
 export const setGlobalSoundState = (enabled: boolean) => {
   isSoundEnabled = enabled;
 };
 
-// Removed Loading Drone (Continuous sounds can be problematic on mobile/browsers)
-export const startLoadingDrone = () => { /* No-op */ };
-export const stopLoadingDrone = () => { /* No-op */ };
+// Spaced beat sound for loading state (Batida espaçada)
+export const startLoadingDrone = () => {
+  if (!isSoundEnabled) return;
+  
+  // If already playing, do nothing
+  if (loadingInterval) return;
+
+  try {
+    const context = getContext();
+    
+    const playBeat = () => {
+      const now = context.currentTime;
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      
+      // Deep thud sound (Heartbeat style)
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(60, now);
+      osc.frequency.exponentialRampToValueAtTime(30, now + 0.1);
+      
+      osc.connect(gain);
+      gain.connect(context.destination);
+      
+      // Short impactful envelope
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      
+      osc.start(now);
+      osc.stop(now + 0.4);
+      
+      // Optional: Add a very faint high tick for texture
+      const osc2 = context.createOscillator();
+      const gain2 = context.createGain();
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(2000, now);
+      osc2.connect(gain2);
+      gain2.connect(context.destination);
+      gain2.gain.setValueAtTime(0.01, now);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc2.start(now);
+      osc2.stop(now + 0.05);
+    };
+
+    // Play immediately then loop
+    playBeat();
+    loadingInterval = setInterval(playBeat, 1200); // 1.2 seconds spacing
+
+  } catch (e) {
+    console.warn("Loading sound failed", e);
+  }
+};
+
+export const stopLoadingDrone = () => {
+  if (loadingInterval) {
+    clearInterval(loadingInterval);
+    loadingInterval = null;
+  }
+};
 
 export const playCountdownTick = (count: number) => {
   if (!isSoundEnabled) return;

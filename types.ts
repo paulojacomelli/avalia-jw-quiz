@@ -18,15 +18,7 @@ export enum QuizFormat {
 }
 
 export enum HintType {
-  RANDOM = 'Aleatória',
-  CONTEXT = 'Contexto',
-  LOCATION = 'Localização',
-  TEMPORAL = 'Temporal',
-  ASSOCIATION = 'Associação',
-  ELIMINATION = 'Eliminação',
-  KEYWORD = 'Palavra-chave',
-  CHARACTER = 'Personagem',
-  COMPARISON = 'Comparação',
+  STANDARD = 'Dica Padrão',
   ASK_AI = 'Pergunte ao Chat'
 }
 

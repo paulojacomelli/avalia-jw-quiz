@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { QuizQuestion, TTSConfig, HintType, QuizFormat, EvaluationResult } from '../types';
 import { HINT_TYPE_OPTIONS } from '../constants';
-import { playSound } from '../utils/audio';
+import { playSound, startLoadingDrone, stopLoadingDrone } from '../utils/audio';
 import { speakText, stopSpeech, isSpeaking } from '../utils/tts';
-import { askAiAboutQuestion, generateHintByType, evaluateFreeResponse } from '../services/geminiService';
+import { askAiAboutQuestion, evaluateFreeResponse } from '../services/geminiService';
 
 interface QuizCardProps {
   question: QuizQuestion;
@@ -20,8 +20,10 @@ interface QuizCardProps {
   activeTeamName?: string;
   ttsConfig?: TTSConfig;
   allowAskAi?: boolean;
+  allowStandardHint?: boolean;
   onSkip?: () => void;
   isSkipping?: boolean;
+  isContesting?: boolean;
 }
 
 export const QuizCard: React.FC<QuizCardProps> = ({ 
@@ -39,11 +41,14 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   activeTeamName,
   ttsConfig,
   allowAskAi = false,
+  allowStandardHint = true,
   onSkip,
-  isSkipping = false
+  isSkipping = false,
+  isContesting = false
 }) => {
   // State for MC/TF
   const [internalSelectedOption, setInternalSelectedOption] = useState<number | null>(null);
+  const [hasConfirmed, setHasConfirmed] = useState(false);
   
   // State for Open Ended
   const [textAnswer, setTextAnswer] = useState('');
@@ -53,10 +58,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const recognitionRef = useRef<any>(null); // For SpeechRecognition
 
   // Hint State
-  const [showHintSelection, setShowHintSelection] = useState(false);
+  const [showHintOptions, setShowHintOptions] = useState(false);
   const [activeHint, setActiveHint] = useState<string | null>(null);
-  const [activeHintTypeLabel, setActiveHintTypeLabel] = useState<string | null>(null);
-  const [isHintLoading, setIsHintLoading] = useState(false);
 
   // Ask AI State (Chat)
   const [showAskAi, setShowAskAi] = useState(false);
@@ -64,18 +67,19 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const [askResponse, setAskResponse] = useState<string | null>(null);
   const [isAskLoading, setIsAskLoading] = useState(false);
 
+  // If forceSelectedOption is provided (Review Mode), use it. Otherwise use internal state.
   const selectedOption = forceSelectedOption !== null ? forceSelectedOption : internalSelectedOption;
   const isMultipleChoice = question.options && question.options.length > 0;
   
   // Determines if we are in "Review/Result" state for this card
-  const isAnsweredOrFinished = selectedOption !== null || isTimeUp || showAnswerKey || evaluationResult;
+  const isAnsweredOrFinished = hasConfirmed || isTimeUp || showAnswerKey || evaluationResult || forceSelectedOption !== null;
 
   useEffect(() => {
     // Reset all state on new question
     setInternalSelectedOption(null);
-    setShowHintSelection(false);
+    setHasConfirmed(false);
+    setShowHintOptions(false);
     setActiveHint(null);
-    setActiveHintTypeLabel(null);
     setShowAskAi(false);
     setAskInput('');
     setAskResponse(null);
@@ -85,17 +89,40 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     setIsRecording(false);
   }, [question.id]);
 
-  // Handle Keyboard Shortcuts (1-4, A-D)
+  // Loading Sound Effect Link
+  useEffect(() => {
+    if (isAskLoading || isEvaluating || isSkipping || isContesting) {
+      startLoadingDrone();
+    } else {
+      stopLoadingDrone();
+    }
+  }, [isAskLoading, isEvaluating, isSkipping, isContesting]);
+
+  // Auto-submit on Time Up
+  useEffect(() => {
+    if (isTimeUp && !hasConfirmed && !showAnswerKey) {
+        handleConfirm();
+    }
+  }, [isTimeUp, hasConfirmed, showAnswerKey]);
+
+  // Handle Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input (Chat or Text Area)
       const tagName = (e.target as HTMLElement).tagName;
       if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
-
-      // Ignore if interaction shouldn't happen
-      if (showAnswerKey || selectedOption !== null || isTimeUp || isSkipping || !isMultipleChoice) return;
+      if (isAnsweredOrFinished || isSkipping || isContesting) return;
 
       const key = e.key.toLowerCase();
+      
+      // Confirm with Enter OR Space
+      if ((key === 'enter' || key === ' ') && internalSelectedOption !== null && !hasConfirmed && isMultipleChoice) {
+          e.preventDefault(); // Prevent scrolling for space and default clicks for enter
+          handleConfirm();
+          return;
+      }
+
+      if (!isMultipleChoice) return;
+
       const mapping: Record<string, number> = {
         '1': 0, 'a': 0,
         '2': 1, 'b': 1,
@@ -110,30 +137,31 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAnswerKey, selectedOption, isTimeUp, isSkipping, isMultipleChoice, question.options.length]);
+  }, [showAnswerKey, internalSelectedOption, hasConfirmed, isAnsweredOrFinished, isSkipping, isContesting, isMultipleChoice, question.options.length]);
 
-  // Handle MC Selection
   const handleSelect = (idx: number) => {
-    if (showAnswerKey || selectedOption !== null || isTimeUp || isSkipping) return; 
+    if (isAnsweredOrFinished || isSkipping || isContesting) return; 
     playSound('click');
     setInternalSelectedOption(idx);
-    
-    // For MC/TF, score is binary (1 or 0) based on index match
-    const isCorrect = idx === question.correctAnswerIndex;
+  };
+
+  const handleConfirm = () => {
+    if (internalSelectedOption === null && !isTimeUp) return;
+    if (hasConfirmed) return; 
+
+    setHasConfirmed(true);
+    const idx = internalSelectedOption;
+    const isCorrect = idx !== null && idx === question.correctAnswerIndex;
     if (onAnswer) onAnswer({ score: isCorrect ? 1 : 0, isCorrect, selectedIndex: idx });
   };
 
-  // Handle Free Response Submission
   const handleSubmitFreeResponse = async () => {
-    if (!textAnswer.trim() || isEvaluating || isSkipping || evaluationResult) return;
-    
+    if (!textAnswer.trim() || isEvaluating || isSkipping || isContesting || evaluationResult) return;
     setIsEvaluating(true);
     playSound('click');
-    
     try {
       const result = await evaluateFreeResponse(question.question, question.correctAnswerText || '', textAnswer);
       setEvaluationResult(result);
-      // Pass the score to the parent
       if (onAnswer) onAnswer({ score: result.score, isCorrect: result.isCorrect, textAnswer: textAnswer });
     } catch (e) {
       alert("Erro ao avaliar resposta. Tente novamente.");
@@ -142,25 +170,21 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     }
   };
 
-  // Handle Microphone
   const toggleRecording = () => {
     if (isRecording) {
       if (recognitionRef.current) recognitionRef.current.stop();
       setIsRecording(false);
       return;
     }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert("Seu navegador não suporta entrada de voz.");
       return;
     }
-
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
     recognition.continuous = false;
     recognition.interimResults = false;
-
     recognition.onstart = () => setIsRecording(true);
     recognition.onend = () => setIsRecording(false);
     recognition.onresult = (event: any) => {
@@ -168,65 +192,48 @@ export const QuizCard: React.FC<QuizCardProps> = ({
       setTextAnswer(prev => prev + (prev ? ' ' : '') + transcript);
     };
     recognition.onerror = () => setIsRecording(false);
-
     recognitionRef.current = recognition;
     recognition.start();
   };
 
-  const handleToggleHintMenu = () => {
-    if (showHintSelection) {
-      setShowHintSelection(false);
-    } else {
-      if (hintsRemaining === 0 && !activeHint && !showAskAi) return;
+  // --- Hint Handling ---
+  
+  const handleMainHelpClick = () => {
+    if (hintsRemaining === 0 && !activeHint && !showAskAi) return;
+
+    if (allowStandardHint && allowAskAi) {
+      setShowHintOptions(!showHintOptions);
       playSound('click');
-      setShowHintSelection(true);
+    } else if (allowStandardHint) {
+       activateStandardHint();
+    } else if (allowAskAi) {
+       activateChat();
     }
   };
 
-  const handleSelectHintType = async (type: HintType) => {
-    if (hintsRemaining === 0 && !activeHint) return; 
-
+  const activateStandardHint = () => {
+    if (hintsRemaining === 0 && !activeHint) return;
     playSound('click');
-    setShowHintSelection(false); 
-
-    if (type === HintType.ASK_AI) {
-      setShowAskAi(true);
-      setActiveHint(null);
-      if (onRevealHint) onRevealHint();
-      return;
-    }
-
-    if (type === HintType.RANDOM) {
-      setActiveHint(question.hint);
-      setActiveHintTypeLabel('Dica do Quiz');
-      setShowAskAi(false);
-      if (onRevealHint) onRevealHint();
-      return;
-    }
-
-    setIsHintLoading(true);
-    setActiveHint(null);
-    setActiveHintTypeLabel(HINT_TYPE_OPTIONS.find(t => t.value === type)?.label || 'Dica');
+    setActiveHint(question.hint);
+    setShowHintOptions(false);
     setShowAskAi(false);
     if (onRevealHint) onRevealHint();
+  };
 
-    try {
-      const generatedHint = await generateHintByType(question, type);
-      setActiveHint(generatedHint);
-    } catch (e) {
-      setActiveHint("Não foi possível gerar esta dica agora. Tente a dica padrão.");
-    } finally {
-      setIsHintLoading(false);
-    }
+  const activateChat = () => {
+    if (hintsRemaining === 0 && !showAskAi) return;
+    playSound('click');
+    setShowAskAi(true);
+    setActiveHint(null);
+    setShowHintOptions(false);
+    if (onRevealHint) onRevealHint();
   };
 
   const handleSubmitAskAi = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!askInput.trim()) return;
-
     setIsAskLoading(true);
     playSound('click');
-    
     try {
       const response = await askAiAboutQuestion(question, askInput);
       setAskResponse(response);
@@ -240,13 +247,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const handleReadAloud = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!ttsConfig) return;
-    
     if (isSpeaking()) {
       stopSpeech();
     } else {
       const teamIntro = activeTeamName ? `Pergunta para ${activeTeamName}. ` : "";
       let textToRead = `${teamIntro}${question.question}.`;
-      
       if (isMultipleChoice) {
         textToRead += ` Alternativa A: ${question.options[0]}. Alternativa B: ${question.options[1]}. Alternativa C: ${question.options[2]}. Alternativa D: ${question.options[3]}.`;
       } else {
@@ -259,24 +264,34 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const getOptionStyle = (optIndex: number) => {
     const baseStyle = "group w-full p-3 md:p-4 rounded-lg text-left transition-all duration-200 text-sm md:text-base relative flex items-center";
     
+    // 1. Review Mode (Show Answer Key)
     if (showAnswerKey) {
-      if (optIndex === question.correctAnswerIndex) return `${baseStyle} bg-green-900/30 border border-green-700 text-green-300`;
+      // Highlight the correct answer GREEN
+      if (optIndex === question.correctAnswerIndex) {
+        return `${baseStyle} bg-green-900/30 border border-green-700 text-green-300`;
+      }
+      // Highlight the WRONG selection RED (Using selectedOption which gets forceSelectedOption)
+      if (optIndex === selectedOption && selectedOption !== question.correctAnswerIndex) {
+        return `${baseStyle} bg-red-900/30 border border-red-700 text-red-300`; 
+      }
+      // Fade out others
       return `${baseStyle} bg-jw-card border border-transparent opacity-50`;
     }
 
-    if (selectedOption !== null || isTimeUp) {
+    // 2. Answering Phase (Confirmed or Time Up)
+    if (hasConfirmed || isTimeUp) {
        if (optIndex === question.correctAnswerIndex) return `${baseStyle} bg-green-900/40 border border-green-600 text-green-200`;
        if (optIndex === selectedOption && selectedOption !== question.correctAnswerIndex) return `${baseStyle} bg-red-900/40 border border-red-800 text-red-200`;
        return `${baseStyle} bg-jw-card border border-transparent opacity-40`;
     }
 
-    return `${baseStyle} bg-jw-card hover:bg-jw-hover text-jw-text border border-transparent hover:border-gray-500/50 ${isSkipping ? 'opacity-50 cursor-not-allowed' : ''}`;
-  };
+    // 3. Selection Made (Before Confirm)
+    if (internalSelectedOption === optIndex) {
+        return `${baseStyle} bg-jw-blue text-white shadow-md transform scale-[1.01] border border-transparent`;
+    }
 
-  const availableHintOptions = HINT_TYPE_OPTIONS.filter(opt => {
-    if (opt.value === HintType.ASK_AI && !allowAskAi) return false;
-    return true;
-  });
+    return `${baseStyle} bg-jw-card hover:bg-jw-hover text-jw-text border border-transparent hover:border-gray-500/50 ${isSkipping || isContesting ? 'opacity-50 cursor-not-allowed' : ''}`;
+  };
 
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col h-full justify-center relative p-2 md:p-0">
@@ -295,9 +310,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
           <h3 className="text-lg md:text-2xl font-medium text-jw-text leading-relaxed">
             {question.question}
           </h3>
-          {/* Show reference immediately if answering is done, not just on answer key */}
           {isAnsweredOrFinished && (
-              <span className="block mt-2 text-sm opacity-50 italic">Ref: {question.reference}</span>
+              <span className="block mt-2 text-sm opacity-50 italic animate-fade-in">Ref: {question.reference}</span>
           )}
           {showAnswerKey && !isMultipleChoice && (
              <div className="mt-2 text-sm text-green-300 bg-green-900/20 p-2 rounded">
@@ -306,7 +320,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
           )}
         </div>
         
-        {/* TTS Button */}
         {ttsConfig?.enabled && (
            <button 
              onClick={handleReadAloud}
@@ -320,32 +333,44 @@ export const QuizCard: React.FC<QuizCardProps> = ({
         )}
       </div>
 
-      {/* CONTENT AREA: Options OR Text Input */}
+      {/* CONTENT AREA */}
       <div className="pl-0 md:pl-8 min-h-[150px]">
         {isMultipleChoice ? (
-          /* Multiple Choice / True False */
-          <div className="space-y-3">
-            {question.options.map((option, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSelect(idx)}
-                onMouseEnter={() => !selectedOption && !isTimeUp && !isSkipping && playSound('hover')}
-                className={getOptionStyle(idx)}
-                disabled={showAnswerKey || selectedOption !== null || isTimeUp || isSkipping}
-              >
-                <span className={`w-8 h-8 rounded-md flex items-center justify-center text-sm mr-3 md:mr-4 shrink-0 transition-colors ${
-                  (selectedOption === idx || (showAnswerKey && idx === question.correctAnswerIndex))
-                    ? 'bg-jw-text text-jw-dark' 
-                    : 'bg-gray-700/50 group-hover:bg-jw-text group-hover:text-jw-dark'
-                }`}>
-                  {String.fromCharCode(65 + idx)}
-                </span>
-                <span>{option}</span>
-              </button>
-            ))}
+          <div className="space-y-4">
+            <div className="space-y-3">
+              {question.options.map((option, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSelect(idx)}
+                  onMouseEnter={() => !hasConfirmed && !isTimeUp && !isSkipping && !isContesting && internalSelectedOption !== idx && playSound('hover')}
+                  className={getOptionStyle(idx)}
+                  disabled={isAnsweredOrFinished || isSkipping || isContesting}
+                >
+                  <span className={`w-8 h-8 rounded-md flex items-center justify-center text-sm mr-3 md:mr-4 shrink-0 transition-colors ${
+                    (internalSelectedOption === idx || (showAnswerKey && idx === question.correctAnswerIndex))
+                      ? 'bg-jw-text text-jw-dark' 
+                      : 'bg-gray-700/50 group-hover:bg-jw-text group-hover:text-jw-dark'
+                  }`}>
+                    {String.fromCharCode(65 + idx)}
+                  </span>
+                  <span>{option}</span>
+                </button>
+              ))}
+            </div>
+            {!isAnsweredOrFinished && internalSelectedOption !== null && (
+              <div className="flex justify-end animate-fade-in-up pt-2">
+                 <button 
+                   onClick={handleConfirm}
+                   className="bg-jw-blue text-white font-bold py-3 px-8 rounded-full shadow-lg hover:bg-opacity-90 transition-transform active:scale-95 flex items-center gap-2"
+                   onMouseEnter={() => playSound('hover')}
+                 >
+                   Confirmar Resposta
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                 </button>
+              </div>
+            )}
           </div>
         ) : (
-          /* Free Response Area */
           <div className="space-y-4 animate-fade-in">
              {!evaluationResult && !showAnswerKey ? (
                <>
@@ -355,26 +380,23 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                      onChange={(e) => setTextAnswer(e.target.value)}
                      placeholder="Digite sua resposta aqui..."
                      className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
-                     disabled={isEvaluating || isTimeUp || isSkipping}
+                     disabled={isEvaluating || isTimeUp || isSkipping || isContesting}
                    />
-                   
-                   {/* Microphone Button */}
                    <button 
                      onClick={toggleRecording}
                      className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
                      title="Falar resposta"
-                     disabled={isEvaluating || isTimeUp || isSkipping}
+                     disabled={isEvaluating || isTimeUp || isSkipping || isContesting}
                    >
                      <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                      </svg>
                    </button>
                  </div>
-                 
                  <div className="flex justify-end">
                     <button 
                        onClick={handleSubmitFreeResponse}
-                       disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
+                       disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping || isContesting}
                        className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                        {isEvaluating ? (
@@ -382,16 +404,14 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                            Avaliando...
                          </>
-                       ) : 'Enviar Resposta'}
+                       ) : 'Confirmar e Enviar'}
                     </button>
                  </div>
                </>
              ) : (
-               /* Result View for Open Ended */
                <div className="bg-jw-card p-4 md:p-6 rounded-lg border border-gray-700">
                   <div className="text-sm opacity-60 mb-2">Sua resposta:</div>
                   <div className="mb-4 italic">"{textAnswer || (forceSelectedOption as any)}"</div>
-                  
                   {evaluationResult && (
                     <div className={`p-4 rounded border ${evaluationResult.score > 0.6 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
                       <div className="flex justify-between items-center mb-2">
@@ -401,7 +421,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                       <p className="text-sm">{evaluationResult.feedback}</p>
                     </div>
                   )}
-                  
                   {showAnswerKey && (
                      <div className="mt-4 pt-4 border-t border-gray-700/50 text-sm">
                         <span className="font-bold text-jw-blue">Gabarito esperado:</span> {question.correctAnswerText}
@@ -413,61 +432,73 @@ export const QuizCard: React.FC<QuizCardProps> = ({
         )}
       </div>
 
-      {/* RESULTS & EXPLANATION SECTION */}
+      {/* RESULTS SECTION */}
       {isAnsweredOrFinished && !showAnswerKey && (
          <div className="pl-0 md:pl-8 mt-6 animate-fade-in space-y-4">
-           {/* Status Message */}
            {isMultipleChoice && (
              <p className={`text-sm font-medium ${selectedOption === question.correctAnswerIndex ? 'text-green-400' : 'text-red-400'}`}>
                {isTimeUp && selectedOption === null ? 'Tempo Esgotado' : (selectedOption === question.correctAnswerIndex ? 'Resposta Correta' : 'Resposta Incorreta')}
              </p>
            )}
-
-           {/* Explanation Box */}
            {question.explanation && (
               <div className="bg-jw-hover/50 p-4 rounded-lg border-l-4 border-jw-blue text-sm leading-relaxed text-jw-text opacity-90">
                  <strong className="block text-xs uppercase tracking-wider opacity-60 mb-1">Por que?</strong>
                  {question.explanation}
               </div>
            )}
-
-           {/* Action Buttons for Result Phase */}
            <div className="flex gap-2">
              <button 
                onClick={() => { setShowAskAi(true); playSound('click'); }} 
                className="text-xs bg-jw-card hover:bg-jw-hover border border-gray-600 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
              >
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-jw-blue"><path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" /></svg>
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-jw-blue"><path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.322-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" /></svg>
                Tirar Dúvida / Contestar no Chat
              </button>
            </div>
          </div>
       )}
       
-      {/* Hints & Actions Section (Only valid BEFORE answering) */}
+      {/* ACTIONS & HINTS SECTION */}
       {!isAnsweredOrFinished && (
         <div className="pl-0 md:pl-8 mt-6">
-          
           <div className="flex items-center gap-2 md:gap-4 flex-wrap">
-            {/* Main Hint Toggle Button */}
-            <button 
-              onClick={handleToggleHintMenu}
-              onMouseEnter={() => !isSkipping && playSound('hover')}
-              disabled={(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isEvaluating}
-              className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
-              {showHintSelection ? 'Cancelar' : 'Ajuda'}
-            </button>
+            
+            {/* Help Button (Context Aware) */}
+            {(allowStandardHint || allowAskAi) && (
+               <div className="relative">
+                  <button 
+                    onClick={handleMainHelpClick}
+                    onMouseEnter={() => !isSkipping && playSound('hover')}
+                    disabled={(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isEvaluating || isContesting}
+                    className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isContesting ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
+                    {activeHint ? 'Esconder Dica' : (showAskAi ? 'Fechar Chat' : 'Ajuda')}
+                  </button>
 
-            {/* Skip Question Button */}
+                  {/* Simple Hint Selection Menu (Only if both enabled) */}
+                  {showHintOptions && (
+                    <div className="absolute bottom-full left-0 mb-2 w-48 bg-jw-card border border-gray-700 rounded-lg shadow-xl overflow-hidden z-20 animate-fade-in">
+                       <button onClick={activateStandardHint} className="w-full text-left px-4 py-3 hover:bg-jw-hover text-sm border-b border-gray-700/50 flex items-center gap-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
+                          Dica Padrão
+                       </button>
+                       <button onClick={activateChat} className="w-full text-left px-4 py-3 hover:bg-jw-hover text-sm flex items-center gap-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
+                          Perguntar ao Chat
+                       </button>
+                    </div>
+                  )}
+               </div>
+            )}
+
+            {/* Skip Button */}
             {onSkip && (
                <button
                  onClick={onSkip}
                  onMouseEnter={() => !isSkipping && playSound('hover')}
-                 disabled={isSkipping || isEvaluating}
+                 disabled={isSkipping || isEvaluating || isContesting}
                  className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-red-900/50 hover:border-red-500 text-red-300 transition-colors ${isSkipping ? 'opacity-50 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
-                 title="Pular esta pergunta e receber uma mais difícil (não pontua)"
                >
                  {isSkipping ? (
                     <>
@@ -483,7 +514,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                </button>
             )}
 
-            {/* Hint Count */}
             {hintsRemaining !== -1 && (
                <span className="text-xs font-mono opacity-50 ml-auto md:ml-0">
                  Dicas: {hintsRemaining}
@@ -491,36 +521,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
             )}
           </div>
 
-          {/* Hint Selection Menu */}
-          {showHintSelection && (
-            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 animate-fade-in bg-jw-card p-4 rounded-xl border border-gray-700/50 shadow-xl z-20 absolute w-full left-0">
-              <div className="col-span-full mb-2 text-xs uppercase tracking-wide opacity-50 font-bold">Escolha o tipo de ajuda:</div>
-              
-              {availableHintOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => handleSelectHintType(opt.value)}
-                  className="flex flex-col items-center justify-center p-3 rounded-lg bg-jw-hover hover:bg-jw-blue hover:text-white transition-colors text-xs text-center border border-transparent hover:border-jw-blue"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 mb-1">
-                    <path strokeLinecap="round" strokeLinejoin="round" d={opt.icon} />
-                  </svg>
-                  {opt.value === HintType.RANDOM ? 'Dica Original' : opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Loading Indicator for Hint */}
-          {isHintLoading && (
-             <div className="mt-4 flex items-center gap-2 text-sm opacity-70 animate-pulse">
-                <div className="w-4 h-4 border-2 border-jw-blue border-t-transparent rounded-full animate-spin"></div>
-                Gerando dica específica...
-             </div>
-          )}
-
           {/* Active Hint Display */}
-          {activeHint && !isHintLoading && (
+          {activeHint && (
             <div className="w-full mt-4 text-sm text-blue-300 bg-blue-900/20 p-4 rounded-lg border border-blue-900/50 animate-fade-in relative">
               <button 
                 onClick={() => setActiveHint(null)} 
@@ -529,14 +531,14 @@ export const QuizCard: React.FC<QuizCardProps> = ({
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
-              <span className="font-bold mr-1 block mb-1 text-blue-200">{activeHintTypeLabel || 'Dica'}:</span> 
+              <span className="font-bold mr-1 block mb-1 text-blue-200">Dica:</span> 
               {activeHint}
             </div>
           )}
         </div>
       )}
 
-      {/* Chat Interface (Always available if toggled) */}
+      {/* Chat Interface */}
       {showAskAi && (
         <div className="w-full mt-4 bg-jw-hover/50 p-4 rounded-lg border border-gray-700/50 animate-fade-in relative pl-0 md:pl-8">
             <button 
@@ -546,12 +548,10 @@ export const QuizCard: React.FC<QuizCardProps> = ({
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
-
             <div className="font-bold text-sm mb-2 text-jw-blue flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
               Chat com Instrutor Virtual
             </div>
-
             {!askResponse ? (
               <form onSubmit={handleSubmitAskAi} className="flex gap-2">
                 <input 
@@ -574,7 +574,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
             ) : (
               <div className="text-sm">
                 <div className="mb-2 font-medium opacity-60">Sua pergunta: "{askInput}"</div>
-                {/* High contrast container */}
                 <div className="text-indigo-900 dark:text-indigo-100 bg-indigo-50 dark:bg-indigo-900/40 p-4 rounded-lg border border-indigo-200 dark:border-indigo-700/50 shadow-inner leading-relaxed">
                   <span className="font-bold mr-1 text-indigo-700 dark:text-indigo-300">🤖 Resposta:</span> {askResponse}
                 </div>
@@ -589,12 +588,28 @@ export const QuizCard: React.FC<QuizCardProps> = ({
         </div>
       )}
 
-      {/* Contest Button (Only on Answer Key view) */}
-      {showAnswerKey && onContest && (
+      {/* Contest Button */}
+      {(showAnswerKey || isAnsweredOrFinished) && onContest && (
         <div className="mt-6 pl-0 md:pl-8 border-t border-gray-700/30 pt-4 flex justify-end">
-          <button onClick={(e) => { e.stopPropagation(); onContest && onContest(); }} type="button" onMouseEnter={() => playSound('hover')} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors opacity-70 hover:opacity-100" title="Acha que esta pergunta está incorreta?">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-            Contestar / Substituir
+          <button 
+            onClick={(e) => { e.stopPropagation(); onContest && !isContesting && onContest(); }} 
+            type="button" 
+            onMouseEnter={() => !isContesting && playSound('hover')} 
+            disabled={isContesting}
+            className={`text-xs flex items-center gap-1 transition-colors ${isContesting ? 'text-gray-500 cursor-not-allowed' : 'text-red-400 hover:text-red-300 opacity-70 hover:opacity-100'}`}
+            title="Acha que esta pergunta está incorreta?"
+          >
+            {isContesting ? (
+              <>
+                <div className="w-3 h-3 border-2 border-gray-500 border-t-transparent rounded-full animate-spin"></div>
+                Substituindo...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+                Contestar / Substituir
+              </>
+            )}
           </button>
         </div>
       )}

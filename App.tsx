@@ -3,7 +3,7 @@ import { SetupForm } from './components/SetupForm';
 import { QuizCard } from './components/QuizCard';
 import { generateQuizContent, generateReplacementQuestion } from './services/geminiService';
 import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
-import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound } from './utils/audio';
+import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
 import { speakText, stopSpeech } from './utils/tts';
 
 type GameState = 'SETUP' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
@@ -31,6 +31,7 @@ function App() {
   
   // Skip State
   const [isSkipping, setIsSkipping] = useState(false);
+  const [isContesting, setIsContesting] = useState(false);
   
   // Teams State
   const [teams, setTeams] = useState<Team[]>([]);
@@ -48,9 +49,6 @@ function App() {
   
   // Countdown State
   const [countdownValue, setCountdownValue] = useState(3);
-
-  // History State
-  const [questionHistory, setQuestionHistory] = useState<string[]>([]);
   
   // API Quota Cooldown State
   const [cooldownTime, setCooldownTime] = useState(0);
@@ -63,7 +61,6 @@ function App() {
   useEffect(() => {
     const savedTheme = localStorage.getItem('jw-quiz-theme') as Theme;
     const savedSound = localStorage.getItem('jw-quiz-sound');
-    const savedHistory = localStorage.getItem('jw-quiz-history');
     const savedTTS = localStorage.getItem('jw-quiz-tts');
     
     if (savedTheme) setTheme(savedTheme);
@@ -74,13 +71,6 @@ function App() {
     }
     if (savedTTS !== null) {
       setTtsEnabled(savedTTS === 'true');
-    }
-    if (savedHistory) {
-      try {
-        setQuestionHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error("Failed to parse history", e);
-      }
     }
   }, []);
 
@@ -95,6 +85,15 @@ function App() {
     }
     localStorage.setItem('jw-quiz-theme', theme);
   }, [theme]);
+
+  // Loading Sound Effect
+  useEffect(() => {
+    if (loading || isContesting) {
+      startLoadingDrone();
+    } else {
+      stopLoadingDrone();
+    }
+  }, [loading, isContesting]);
 
   // Countdown Logic
   useEffect(() => {
@@ -149,7 +148,7 @@ function App() {
     // Check both global toggle and config specific toggle (autoRead)
     const shouldRead = ttsEnabled && quizConfig?.tts.enabled && quizConfig.tts.autoRead;
     
-    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
+    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && !isContesting && cooldownTime === 0) {
       const timeout = setTimeout(() => {
         const q = quizData.questions[currentQuestionIndex];
         const teamIntro = quizConfig?.isTeamMode ? `Pergunta para ${teams[currentTeamIndex].name}. ` : "";
@@ -171,13 +170,13 @@ function App() {
         stopSpeech();
       };
     }
-  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime]);
+  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, isContesting, ttsEnabled, quizConfig, cooldownTime]);
 
-  // --- Keyboard Shortcuts (Spacebar to Next) ---
+  // --- Keyboard Shortcuts (Spacebar & Enter to Next) ---
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // If pressing Space
-      if (e.code === 'Space') {
+      // Allow Space or Enter
+      if (e.code === 'Space' || e.key === 'Enter') {
         // Avoid scrolling/triggering if user is typing in a textarea/input
         const tagName = (e.target as HTMLElement).tagName;
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
@@ -185,7 +184,8 @@ function App() {
         // Prevent action if in cooldown
         if (cooldownTime > 0) return;
 
-        e.preventDefault(); // Prevent page scroll
+        // Prevent page scroll for space and button clicks for enter to avoid double triggering
+        e.preventDefault(); 
 
         // Context-aware action
         if (gameState === 'PLAYING' && isCurrentQuestionAnswered) {
@@ -217,18 +217,6 @@ function App() {
     if (!newState) stopSpeech();
   };
 
-  const handleClearHistory = () => {
-    setQuestionHistory([]);
-    localStorage.removeItem('jw-quiz-history');
-    alert("Histórico de perguntas apagado. Novas perguntas podem se repetir.");
-  };
-
-  const updateHistory = (newQuestions: string[]) => {
-    const updated = [...questionHistory, ...newQuestions].slice(-150);
-    setQuestionHistory(updated);
-    localStorage.setItem('jw-quiz-history', JSON.stringify(updated));
-  };
-
   // Centralized Error Handling for API Calls
   const handleApiError = (err: any) => {
     const msg = err?.message || String(err);
@@ -244,6 +232,9 @@ function App() {
   };
 
   const handleGenerate = async (config: QuizConfig) => {
+    // Attempt to resume audio context on user gesture
+    resumeAudioContext();
+
     // Ensure the generated config respects the current global TTS state
     const finalConfig = {
       ...config,
@@ -282,12 +273,8 @@ function App() {
     }
 
     try {
-      const data = await generateQuizContent(finalConfig, questionHistory.slice(-50));
+      const data = await generateQuizContent(finalConfig);
       setQuizData(data);
-      
-      const newQuestionTexts = data.questions.map(q => q.question);
-      updateHistory(newQuestionTexts);
-
       startCountdownSequence(finalConfig.timeLimit);
     } catch (err: any) {
       handleApiError(err);
@@ -315,6 +302,7 @@ function App() {
     setCurrentTeamIndex(0);
     setCurrentRound(1);
     setIsSkipping(false);
+    setIsContesting(false);
   };
 
   const resetTimer = () => {
@@ -327,7 +315,7 @@ function App() {
 
     let interval: ReturnType<typeof setInterval>;
     
-    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
+    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && !isContesting && cooldownTime === 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -337,13 +325,13 @@ function App() {
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
+    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && !isContesting && cooldownTime === 0) {
       if (quizConfig?.enableTimerSound) playSound('timeUp');
       handleAnswer({ score: 0, isCorrect: false });
     }
 
     return () => clearInterval(interval);
-  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime]);
+  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, isContesting, cooldownTime]);
 
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
     stopSpeech();
@@ -425,7 +413,6 @@ function App() {
         questions: newQuestions
       });
 
-      updateHistory([newQuestion.question]);
       resetTimer();
       setIsCurrentQuestionAnswered(false);
       
@@ -475,43 +462,93 @@ function App() {
     setCountdownValue(3);
   };
 
+  // --- RECREATED FUNCTION: ANUL AND REPLACE ---
   const handleContestQuestion = async (indexToContest: number) => {
     if (!quizData || !quizConfig) return;
 
-    // Different behavior and message depending on game state
-    const isReviewingMode = gameState === 'FINISHED';
-    const message = isReviewingMode 
-      ? "Deseja substituir esta pergunta no histórico? A pontuação original será mantida, mas a pergunta será atualizada."
-      : "Você deseja contestar esta pergunta? Ela será substituída por uma nova e o time atual deverá respondê-la.";
+    // Context check
+    const isActiveGame = gameState === 'PLAYING' && indexToContest === currentQuestionIndex;
+    
+    // Confirmation Dialog
+    const message = isActiveGame 
+      ? "Contestar e ANULAR esta pergunta? A pontuação será revertida e uma nova pergunta será gerada."
+      : "Substituir esta pergunta no histórico? A pontuação anterior será removida.";
 
-    const confirmContest = window.confirm(message);
-    if (!confirmContest) return;
+    if (!window.confirm(message)) return;
 
-    setLoading(true);
+    // Start Process
+    setIsContesting(true);
+    stopSpeech();
+    playSound('click');
+
     try {
-      const oldQuestion = quizData.questions[indexToContest];
-      const newQuestion = await generateReplacementQuestion(quizConfig, oldQuestion.question);
-      
-      // Force unique ID to ensure React remounts the component even if Gemini returns similar ID
-      newQuestion.id = `sub-${Date.now()}`;
-      
-      const newQuestions = [...quizData.questions];
-      newQuestions[indexToContest] = newQuestion;
-      setQuizData({ ...quizData, questions: newQuestions });
+        const oldQuestion = quizData.questions[indexToContest];
+        
+        // 1. Generate new question
+        const newQuestion = await generateReplacementQuestion(quizConfig, oldQuestion.question);
+        
+        // 2. Annulment Logic (Revert Score if answered)
+        const previousAnswer = userAnswers[indexToContest];
+        
+        // Determine correct team index for this question
+        // In this app, teams rotate per question. Question 0 -> Team 0, Question 1 -> Team 1 (if 2 teams)
+        const teamIdx = indexToContest % teams.length;
 
-      // Important: Clear the user answer for this index so it doesn't show the old selection on the new question
-      setUserAnswers(prev => {
-         const newAnswers = [...prev];
-         newAnswers[indexToContest] = null; 
-         return newAnswers;
-      });
+        if (previousAnswer !== null && previousAnswer !== undefined) {
+             let scoreDed = 0;
+             let correctDed = 0;
+             let wrongDed = 0;
 
-      updateHistory([newQuestion.question]);
-      
+             // Only revert specific points if it was Multiple Choice/True False 
+             // Logic: 1 point for correct, 0 for wrong.
+             if (typeof previousAnswer === 'number') {
+                 const wasCorrect = previousAnswer === oldQuestion.correctAnswerIndex;
+                 if (wasCorrect) {
+                     scoreDed = 1;
+                     correctDed = 1;
+                 } else {
+                     wrongDed = 1;
+                 }
+             }
+             // Note: For open ended, scoring is more complex, but standard annulment removes the answer anyway.
+
+             // Update Team Stats (Revert)
+             setTeams(prevTeams => prevTeams.map((team, idx) => {
+                if (idx !== teamIdx) return team;
+                return {
+                    ...team,
+                    score: Math.max(0, parseFloat((team.score - scoreDed).toFixed(1))),
+                    correctCount: Math.max(0, team.correctCount - correctDed),
+                    wrongCount: Math.max(0, team.wrongCount - wrongDed)
+                };
+             }));
+        }
+
+        // 3. Update Quiz Data with new Question
+        const newQuestions = [...quizData.questions];
+        newQuestions[indexToContest] = newQuestion;
+        
+        setQuizData({ ...quizData, questions: newQuestions });
+
+        // 4. Reset User Answer for this slot (It is now a fresh question)
+        setUserAnswers(prev => {
+            const newArr = [...prev];
+            newArr[indexToContest] = null; 
+            return newArr;
+        });
+
+        // 5. Reset Game State if it is the currently active question
+        // This is crucial to "Restart" the card interaction
+        if (isActiveGame) {
+            setIsCurrentQuestionAnswered(false);
+            resetTimer();
+        }
+
     } catch (err: any) {
-      handleApiError(err);
+        handleApiError(err);
+        alert("Erro ao contestar. Verifique sua conexão.");
     } finally {
-      setLoading(false);
+        setIsContesting(false);
     }
   };
 
@@ -522,6 +559,7 @@ function App() {
     setGameState('SETUP');
     setIsReviewing(false);
     setIsSkipping(false);
+    setIsContesting(false);
     setCooldownTime(0);
   };
 
@@ -744,7 +782,6 @@ function App() {
                 onGenerate={handleGenerate} 
                 isLoading={loading} 
                 ttsEnabled={ttsEnabled}
-                onClearHistory={handleClearHistory}
              />
           </div>
         )}
@@ -766,10 +803,12 @@ function App() {
                  // Props for new features
                  activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
                  ttsConfig={quizConfig?.tts}
-                 // Ensure we check global state too (merged in handleGenerate, but for safety)
                  allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
+                 allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
                  onSkip={handleSkipQuestion}
                  isSkipping={isSkipping}
+                 isContesting={isContesting}
+                 onContest={() => handleContestQuestion(currentQuestionIndex)}
                />
              </div>
           </div>
@@ -850,6 +889,7 @@ function App() {
                         forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
                         onContest={() => handleContestQuestion(reviewIndex)}
                         ttsConfig={quizConfig?.tts}
+                        isContesting={isContesting}
                     />
                  </div>
                  <div className="flex justify-between items-center mt-8 pb-4">
