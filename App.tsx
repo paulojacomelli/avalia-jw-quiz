@@ -31,7 +31,6 @@ function App() {
   
   // Skip State
   const [isSkipping, setIsSkipping] = useState(false);
-  const [isContesting, setIsContesting] = useState(false);
   
   // Teams State
   const [teams, setTeams] = useState<Team[]>([]);
@@ -88,12 +87,12 @@ function App() {
 
   // Loading Sound Effect
   useEffect(() => {
-    if (loading || isContesting) {
+    if (loading) {
       startLoadingDrone();
     } else {
       stopLoadingDrone();
     }
-  }, [loading, isContesting]);
+  }, [loading]);
 
   // Countdown Logic
   useEffect(() => {
@@ -148,7 +147,7 @@ function App() {
     // Check both global toggle and config specific toggle (autoRead)
     const shouldRead = ttsEnabled && quizConfig?.tts.enabled && quizConfig.tts.autoRead;
     
-    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && !isContesting && cooldownTime === 0) {
+    if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       const timeout = setTimeout(() => {
         const q = quizData.questions[currentQuestionIndex];
         const teamIntro = quizConfig?.isTeamMode ? `Pergunta para ${teams[currentTeamIndex].name}. ` : "";
@@ -170,7 +169,7 @@ function App() {
         stopSpeech();
       };
     }
-  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, isContesting, ttsEnabled, quizConfig, cooldownTime]);
+  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime]);
 
   // --- Keyboard Shortcuts (Spacebar & Enter to Next) ---
   useEffect(() => {
@@ -302,7 +301,6 @@ function App() {
     setCurrentTeamIndex(0);
     setCurrentRound(1);
     setIsSkipping(false);
-    setIsContesting(false);
   };
 
   const resetTimer = () => {
@@ -315,7 +313,7 @@ function App() {
 
     let interval: ReturnType<typeof setInterval>;
     
-    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && !isContesting && cooldownTime === 0) {
+    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -325,13 +323,13 @@ function App() {
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && !isContesting && cooldownTime === 0) {
+    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       if (quizConfig?.enableTimerSound) playSound('timeUp');
       handleAnswer({ score: 0, isCorrect: false });
     }
 
     return () => clearInterval(interval);
-  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, isContesting, cooldownTime]);
+  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime]);
 
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
     stopSpeech();
@@ -462,96 +460,6 @@ function App() {
     setCountdownValue(3);
   };
 
-  // --- RECREATED FUNCTION: ANUL AND REPLACE ---
-  const handleContestQuestion = async (indexToContest: number) => {
-    if (!quizData || !quizConfig) return;
-
-    // Context check
-    const isActiveGame = gameState === 'PLAYING' && indexToContest === currentQuestionIndex;
-    
-    // Confirmation Dialog
-    const message = isActiveGame 
-      ? "Contestar e ANULAR esta pergunta? A pontuação será revertida e uma nova pergunta será gerada."
-      : "Substituir esta pergunta no histórico? A pontuação anterior será removida.";
-
-    if (!window.confirm(message)) return;
-
-    // Start Process
-    setIsContesting(true);
-    stopSpeech();
-    playSound('click');
-
-    try {
-        const oldQuestion = quizData.questions[indexToContest];
-        
-        // 1. Generate new question
-        const newQuestion = await generateReplacementQuestion(quizConfig, oldQuestion.question);
-        
-        // 2. Annulment Logic (Revert Score if answered)
-        const previousAnswer = userAnswers[indexToContest];
-        
-        // Determine correct team index for this question
-        // In this app, teams rotate per question. Question 0 -> Team 0, Question 1 -> Team 1 (if 2 teams)
-        const teamIdx = indexToContest % teams.length;
-
-        if (previousAnswer !== null && previousAnswer !== undefined) {
-             let scoreDed = 0;
-             let correctDed = 0;
-             let wrongDed = 0;
-
-             // Only revert specific points if it was Multiple Choice/True False 
-             // Logic: 1 point for correct, 0 for wrong.
-             if (typeof previousAnswer === 'number') {
-                 const wasCorrect = previousAnswer === oldQuestion.correctAnswerIndex;
-                 if (wasCorrect) {
-                     scoreDed = 1;
-                     correctDed = 1;
-                 } else {
-                     wrongDed = 1;
-                 }
-             }
-             // Note: For open ended, scoring is more complex, but standard annulment removes the answer anyway.
-
-             // Update Team Stats (Revert)
-             setTeams(prevTeams => prevTeams.map((team, idx) => {
-                if (idx !== teamIdx) return team;
-                return {
-                    ...team,
-                    score: Math.max(0, parseFloat((team.score - scoreDed).toFixed(1))),
-                    correctCount: Math.max(0, team.correctCount - correctDed),
-                    wrongCount: Math.max(0, team.wrongCount - wrongDed)
-                };
-             }));
-        }
-
-        // 3. Update Quiz Data with new Question
-        const newQuestions = [...quizData.questions];
-        newQuestions[indexToContest] = newQuestion;
-        
-        setQuizData({ ...quizData, questions: newQuestions });
-
-        // 4. Reset User Answer for this slot (It is now a fresh question)
-        setUserAnswers(prev => {
-            const newArr = [...prev];
-            newArr[indexToContest] = null; 
-            return newArr;
-        });
-
-        // 5. Reset Game State if it is the currently active question
-        // This is crucial to "Restart" the card interaction
-        if (isActiveGame) {
-            setIsCurrentQuestionAnswered(false);
-            resetTimer();
-        }
-
-    } catch (err: any) {
-        handleApiError(err);
-        alert("Erro ao contestar. Verifique sua conexão.");
-    } finally {
-        setIsContesting(false);
-    }
-  };
-
   const handleReset = () => {
     stopSpeech();
     setQuizData(null);
@@ -559,7 +467,6 @@ function App() {
     setGameState('SETUP');
     setIsReviewing(false);
     setIsSkipping(false);
-    setIsContesting(false);
     setCooldownTime(0);
   };
 
@@ -807,8 +714,6 @@ function App() {
                  allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
                  onSkip={handleSkipQuestion}
                  isSkipping={isSkipping}
-                 isContesting={isContesting}
-                 onContest={() => handleContestQuestion(currentQuestionIndex)}
                />
              </div>
           </div>
@@ -887,9 +792,7 @@ function App() {
                         total={quizData.questions.length}
                         showAnswerKey={true}
                         forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
-                        onContest={() => handleContestQuestion(reviewIndex)}
                         ttsConfig={quizConfig?.tts}
-                        isContesting={isContesting}
                     />
                  </div>
                  <div className="flex justify-between items-center mt-8 pb-4">

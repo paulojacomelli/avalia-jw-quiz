@@ -14,7 +14,6 @@ interface QuizCardProps {
   onAnswer?: (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => void;
   forceSelectedOption?: number | null;
   isTimeUp?: boolean;
-  onContest?: () => void;
   hintsRemaining?: number; 
   onRevealHint?: () => void;
   activeTeamName?: string;
@@ -23,7 +22,6 @@ interface QuizCardProps {
   allowStandardHint?: boolean;
   onSkip?: () => void;
   isSkipping?: boolean;
-  isContesting?: boolean;
 }
 
 export const QuizCard: React.FC<QuizCardProps> = ({ 
@@ -35,7 +33,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   onAnswer,
   forceSelectedOption = null,
   isTimeUp = false,
-  onContest,
   hintsRemaining = -1,
   onRevealHint,
   activeTeamName,
@@ -44,7 +41,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   allowStandardHint = true,
   onSkip,
   isSkipping = false,
-  isContesting = false
 }) => {
   // State for MC/TF
   const [internalSelectedOption, setInternalSelectedOption] = useState<number | null>(null);
@@ -72,7 +68,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const isMultipleChoice = question.options && question.options.length > 0;
   
   // Determines if we are in "Review/Result" state for this card
-  const isAnsweredOrFinished = hasConfirmed || isTimeUp || showAnswerKey || evaluationResult || forceSelectedOption !== null;
+  // Fix: Ensure this is strictly boolean by checking !!evaluationResult
+  const isAnsweredOrFinished = hasConfirmed || isTimeUp || showAnswerKey || !!evaluationResult || forceSelectedOption !== null;
 
   useEffect(() => {
     // Reset all state on new question
@@ -91,12 +88,12 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
   // Loading Sound Effect Link
   useEffect(() => {
-    if (isAskLoading || isEvaluating || isSkipping || isContesting) {
+    if (isAskLoading || isEvaluating || isSkipping) {
       startLoadingDrone();
     } else {
       stopLoadingDrone();
     }
-  }, [isAskLoading, isEvaluating, isSkipping, isContesting]);
+  }, [isAskLoading, isEvaluating, isSkipping]);
 
   // Auto-submit on Time Up
   useEffect(() => {
@@ -110,7 +107,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       const tagName = (e.target as HTMLElement).tagName;
       if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
-      if (isAnsweredOrFinished || isSkipping || isContesting) return;
+      if (isAnsweredOrFinished || isSkipping) return;
 
       const key = e.key.toLowerCase();
       
@@ -137,10 +134,10 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAnswerKey, internalSelectedOption, hasConfirmed, isAnsweredOrFinished, isSkipping, isContesting, isMultipleChoice, question.options.length]);
+  }, [showAnswerKey, internalSelectedOption, hasConfirmed, isAnsweredOrFinished, isSkipping, isMultipleChoice, question.options.length]);
 
   const handleSelect = (idx: number) => {
-    if (isAnsweredOrFinished || isSkipping || isContesting) return; 
+    if (isAnsweredOrFinished || isSkipping) return; 
     playSound('click');
     setInternalSelectedOption(idx);
   };
@@ -156,7 +153,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   };
 
   const handleSubmitFreeResponse = async () => {
-    if (!textAnswer.trim() || isEvaluating || isSkipping || isContesting || evaluationResult) return;
+    if (!textAnswer.trim() || isEvaluating || isSkipping || evaluationResult) return;
     setIsEvaluating(true);
     playSound('click');
     try {
@@ -290,7 +287,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
         return `${baseStyle} bg-jw-blue text-white shadow-md transform scale-[1.01] border border-transparent`;
     }
 
-    return `${baseStyle} bg-jw-card hover:bg-jw-hover text-jw-text border border-transparent hover:border-gray-500/50 ${isSkipping || isContesting ? 'opacity-50 cursor-not-allowed' : ''}`;
+    return `${baseStyle} bg-jw-card hover:bg-jw-hover text-jw-text border border-transparent hover:border-gray-500/50 ${isSkipping ? 'opacity-50 cursor-not-allowed' : ''}`;
   };
 
   return (
@@ -342,9 +339,9 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                 <button
                   key={idx}
                   onClick={() => handleSelect(idx)}
-                  onMouseEnter={() => !hasConfirmed && !isTimeUp && !isSkipping && !isContesting && internalSelectedOption !== idx && playSound('hover')}
+                  onMouseEnter={() => !hasConfirmed && !isTimeUp && !isSkipping && internalSelectedOption !== idx && playSound('hover')}
                   className={getOptionStyle(idx)}
-                  disabled={isAnsweredOrFinished || isSkipping || isContesting}
+                  disabled={isAnsweredOrFinished || isSkipping}
                 >
                   <span className={`w-8 h-8 rounded-md flex items-center justify-center text-sm mr-3 md:mr-4 shrink-0 transition-colors ${
                     (internalSelectedOption === idx || (showAnswerKey && idx === question.correctAnswerIndex))
@@ -380,13 +377,13 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                      onChange={(e) => setTextAnswer(e.target.value)}
                      placeholder="Digite sua resposta aqui..."
                      className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
-                     disabled={isEvaluating || isTimeUp || isSkipping || isContesting}
+                     disabled={isEvaluating || isTimeUp || isSkipping}
                    />
                    <button 
                      onClick={toggleRecording}
                      className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
                      title="Falar resposta"
-                     disabled={isEvaluating || isTimeUp || isSkipping || isContesting}
+                     disabled={isEvaluating || isTimeUp || isSkipping}
                    >
                      <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
@@ -396,7 +393,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                  <div className="flex justify-end">
                     <button 
                        onClick={handleSubmitFreeResponse}
-                       disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping || isContesting}
+                       disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
                        className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                        {isEvaluating ? (
@@ -452,7 +449,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                className="text-xs bg-jw-card hover:bg-jw-hover border border-gray-600 px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
              >
                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-jw-blue"><path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.322-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" /></svg>
-               Tirar Dúvida / Contestar no Chat
+               Tirar Dúvida
              </button>
            </div>
          </div>
@@ -469,8 +466,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                   <button 
                     onClick={handleMainHelpClick}
                     onMouseEnter={() => !isSkipping && playSound('hover')}
-                    disabled={(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isEvaluating || isContesting}
-                    className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isContesting ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
+                    disabled={(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isEvaluating}
+                    className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
                     {activeHint ? 'Esconder Dica' : (showAskAi ? 'Fechar Chat' : 'Ajuda')}
@@ -497,7 +494,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                <button
                  onClick={onSkip}
                  onMouseEnter={() => !isSkipping && playSound('hover')}
-                 disabled={isSkipping || isEvaluating || isContesting}
+                 disabled={isSkipping || isEvaluating}
                  className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-red-900/50 hover:border-red-500 text-red-300 transition-colors ${isSkipping ? 'opacity-50 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
                >
                  {isSkipping ? (
@@ -585,32 +582,6 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                 </button>
               </div>
             )}
-        </div>
-      )}
-
-      {/* Contest Button */}
-      {(showAnswerKey || isAnsweredOrFinished) && onContest && (
-        <div className="mt-6 pl-0 md:pl-8 border-t border-gray-700/30 pt-4 flex justify-end">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onContest && !isContesting && onContest(); }} 
-            type="button" 
-            onMouseEnter={() => !isContesting && playSound('hover')} 
-            disabled={isContesting}
-            className={`text-xs flex items-center gap-1 transition-colors ${isContesting ? 'text-gray-500 cursor-not-allowed' : 'text-red-400 hover:text-red-300 opacity-70 hover:opacity-100'}`}
-            title="Acha que esta pergunta está incorreta?"
-          >
-            {isContesting ? (
-              <>
-                <div className="w-3 h-3 border-2 border-gray-500 border-t-transparent rounded-full animate-spin"></div>
-                Substituindo...
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-                Contestar / Substituir
-              </>
-            )}
-          </button>
         </div>
       )}
     </div>
