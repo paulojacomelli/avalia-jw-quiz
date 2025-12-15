@@ -316,8 +316,11 @@ function App() {
     if (quizConfig && !quizConfig.enableTimer) return;
 
     let interval: ReturnType<typeof setInterval>;
+
+    const isReviewPending = isReviewing && userAnswers[reviewIndex] === null;
+    const isPlayPending = gameState === 'PLAYING' && !isCurrentQuestionAnswered;
     
-    if (gameState === 'PLAYING' && !isCurrentQuestionAnswered && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
+    if ((isPlayPending || isReviewPending) && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -327,13 +330,13 @@ function App() {
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
+    } else if (timeLeft === 0 && (isPlayPending || isReviewPending) && !isSkipping && cooldownTime === 0) {
       if (quizConfig?.enableTimerSound) playSound('timeUp');
       handleAnswer({ score: 0, isCorrect: false });
     }
 
     return () => clearInterval(interval);
-  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime]);
+  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime, isReviewing, userAnswers, reviewIndex]);
 
   // Handle answers (from both Playing and Review modes)
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
@@ -401,25 +404,8 @@ function App() {
                 wasCorrect = true;
                 scoreToRevert = 1;
             }
-        } else {
-             // Open Ended - We can't know the exact score granted without history, 
-             // but if they are replacing it, we assume we want to reset the attempt.
-             // We will assume no score deduction to avoid negative drift if we are unsure,
-             // OR simplified: assume if it was marked "Respondido", it might have been wrong or right.
-             // For safety in this version: We just clear the answer and let them earn new points.
-             // If they had points, they keep them? No, that's unfair.
-             // Let's assume if it was a "Retry", they forfeit the previous result.
-             // Since we don't track per-question score in `userAnswers`, we will just reset the answer slot
-             // and NOT deduct score to be safe, essentially giving a "Bonus Question" replacement.
-             // OR: We check if `voidedIndices` has it.
         }
 
-        // Simplification: Just reset the question slot to allow answering again.
-        // If exact score reversal is needed, we would need a history log.
-        // For now: We grant a "Re-roll". 
-        // If the user got it WRONG previously, this is a second chance (fair).
-        // If the user got it RIGHT, they probably wouldn't click "Replace".
-        
         if (wasCorrect) {
              setTeams(prev => prev.map((t, i) => {
                 if (i !== teamIdx) return t;
@@ -451,6 +437,9 @@ function App() {
         const newUserAnswers = [...userAnswers];
         newUserAnswers[index] = null; // Reset to allow answering
         setUserAnswers(newUserAnswers);
+        
+        // Reset Timer
+        setTimeLeft(timeLimit);
 
     } catch (e: any) {
         handleApiError(e);
@@ -557,7 +546,7 @@ function App() {
   };
 
   const getTimerStyles = () => {
-    if (isCurrentQuestionAnswered) return 'bg-jw-hover text-gray-400';
+    if (isCurrentQuestionAnswered && !isReviewing) return 'bg-jw-hover text-gray-400';
     const percentage = (timeLeft / timeLimit) * 100;
     if (percentage > 50) return 'bg-emerald-600 text-white shadow-[0_0_15px_rgba(5,150,105,0.4)]';
     if (percentage > 20) return 'bg-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
@@ -753,7 +742,7 @@ function App() {
       )}
 
       {/* TIMER */}
-      {gameState === 'PLAYING' && quizConfig?.enableTimer && (
+      {quizConfig?.enableTimer && (gameState === 'PLAYING' || (isReviewing && userAnswers[reviewIndex] === null)) && (
          <div className={`fixed top-24 right-4 md:right-6 px-3 py-1 md:px-4 md:py-2 rounded-full font-bold text-sm md:text-lg shadow-lg transition-all duration-300 z-40 flex items-center gap-2 ${getTimerStyles()}`}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 md:w-5 md:h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             <span className="font-mono">{timeLeft}s</span>
