@@ -1,4 +1,5 @@
 
+
 export enum Difficulty {
   EASY = 'Fácil',
   MEDIUM = 'Médio',
@@ -47,7 +48,8 @@ export interface Team {
 export interface TTSConfig {
   enabled: boolean;
   autoRead: boolean;
-  gender: 'female' | 'male';
+  engine: 'browser' | 'gemini'; // New field for engine selection
+  gender: 'female' | 'male'; // Updated to allow male voice selection logic
   rate: number; // 0.5 to 2
   volume: number; // 0 to 1
 }

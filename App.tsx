@@ -34,8 +34,18 @@ function App() {
   const [theme, setTheme] = useState<Theme>('dark');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(1.0); 
-  const [ttsEnabled, setTtsEnabled] = useState(false); // Global TTS Toggle
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // TTS Global State
+  const [ttsEnabled, setTtsEnabled] = useState(false); 
+  const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
+    enabled: false,
+    autoRead: true,
+    engine: 'gemini', // Default to Natural
+    gender: 'female', 
+    rate: 1.5, // Requested speed
+    volume: 1.0
+  });
 
   // Game State
   const [gameState, setGameState] = useState<GameState>('SETUP');
@@ -83,6 +93,7 @@ function App() {
     const savedTheme = localStorage.getItem('jw-quiz-theme') as Theme;
     const savedSound = localStorage.getItem('jw-quiz-sound');
     const savedTTS = localStorage.getItem('jw-quiz-tts');
+    const savedEngine = localStorage.getItem('jw-quiz-tts-engine');
     
     if (savedTheme) setTheme(savedTheme);
     if (savedSound !== null) {
@@ -90,9 +101,14 @@ function App() {
       setSoundEnabled(isEnabled);
       setGlobalSoundState(isEnabled);
     }
-    if (savedTTS !== null) {
-      setTtsEnabled(savedTTS === 'true');
-    }
+    
+    // Restore TTS Settings
+    const isTTSActive = savedTTS === 'true';
+    setTtsEnabled(isTTSActive);
+    
+    // Apply logic for engine/gender/rate based on saved engine or default
+    const initialEngine = (savedEngine === 'browser' ? 'browser' : 'gemini');
+    updateTTSConfigState(initialEngine, isTTSActive);
 
     // Listener to update state if user presses Esc
     const handleFullscreenChange = () => {
@@ -173,6 +189,23 @@ function App() {
   }, [cooldownTime]);
 
   // --- TTS Logic ---
+  
+  // Helper to centralize TTS config updates based on engine rules
+  const updateTTSConfigState = (engine: 'browser' | 'gemini', enabled: boolean) => {
+     const newConfig: TTSConfig = {
+        enabled: enabled,
+        autoRead: true,
+        engine: engine,
+        // Voz Clássica (Browser) = Male (Daniel), Voz Natural (Gemini) = Female (Kore)
+        gender: engine === 'browser' ? 'male' : 'female',
+        rate: 1.5, // Fixed 1.5x speed as requested
+        volume: 1.0
+     };
+     setTtsConfig(newConfig);
+     // Persist engine choice
+     localStorage.setItem('jw-quiz-tts-engine', engine);
+  };
+
   // Ensure we stop speech if TTS is disabled globally
   useEffect(() => {
     if (!ttsEnabled) {
@@ -182,30 +215,27 @@ function App() {
 
   useEffect(() => {
     // Check both global toggle and config specific toggle (autoRead)
-    const shouldRead = ttsEnabled && quizConfig?.tts.enabled && quizConfig.tts.autoRead;
+    // Note: quizConfig.tts is a snapshot at generation time, but we should respect global toggle
+    const shouldRead = ttsEnabled && ttsConfig.autoRead;
     
     if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       const timeout = setTimeout(() => {
         const q = quizData.questions[currentQuestionIndex];
         const teamIntro = quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined;
         
-        // If we have pre-generated audio, use it directly via speakText which now handles it
-        // If not, it falls back to generation (though generation handles pre-gen too)
-        
         // Reconstruct text for fallback or if needed, but pass audioBase64 if present
         const textToRead = getQuestionReadAloudText(q, teamIntro);
 
-        if (quizConfig?.tts) {
-          // Pass apiKey and the pre-generated audio
-          speakText(textToRead, quizConfig.tts, apiKey || undefined, q.audioBase64);
-        }
+        // Always use the latest global ttsConfig for playback
+        speakText(textToRead, ttsConfig, apiKey || undefined, q.audioBase64);
+        
       }, 500);
       return () => {
         clearTimeout(timeout);
         stopSpeech();
       };
     }
-  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime, apiKey]);
+  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, ttsConfig, cooldownTime, apiKey]);
 
   // --- Keyboard Shortcuts (Spacebar & Enter to Next) ---
   useEffect(() => {
@@ -251,7 +281,15 @@ function App() {
     const newState = !ttsEnabled;
     setTtsEnabled(newState);
     localStorage.setItem('jw-quiz-tts', String(newState));
+    updateTTSConfigState(ttsConfig.engine, newState);
     if (!newState) stopSpeech();
+  };
+  
+  const handleTTSEngineChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const newEngine = e.target.value as 'browser' | 'gemini';
+      updateTTSConfigState(newEngine, ttsEnabled);
+      // Play a small sample or click sound
+      playSound('click');
   };
 
   const toggleFullscreen = () => {
@@ -354,13 +392,11 @@ function App() {
     // Attempt to resume audio context on user gesture
     resumeAudioContext();
 
-    // Ensure the generated config respects the current global TTS state
+    // INJECT THE GLOBAL TTS CONFIG INTO THE QUIZ CONFIG
+    // This overrides whatever dummy tts config might have come from the form
     const finalConfig = {
       ...config,
-      tts: {
-        ...config.tts,
-        enabled: ttsEnabled // Sync with global toggle at start
-      }
+      tts: ttsConfig
     };
 
     setLoading(true);
@@ -398,7 +434,7 @@ function App() {
       let data = await generateQuizContent(apiKey, finalConfig);
       
       // --- PRE-GENERATE AUDIO IF TTS IS ENABLED ---
-      if (finalConfig.tts.enabled && ttsEnabled) {
+      if (ttsEnabled && finalConfig.tts.engine === 'gemini') {
           setLoadingMessage("Gerando narração com IA (isso pode levar alguns segundos)...");
           // Extract just team names for the generator
           const teamNameList = tempTeams.map(t => t.name);
@@ -507,10 +543,10 @@ function App() {
     setUserAnswers(newAnswers);
 
     // TTS Feedback (Only in play mode generally, or if config allows)
-    if (!isReviewing && ttsEnabled && quizConfig?.tts.enabled) {
+    if (!isReviewing && ttsEnabled) {
       const feedback = result.score === 0 ? "Resposta incorreta." : (result.score === 1 ? "Resposta correta!" : `Parcialmente correto. ${result.score} pontos.`);
       // Pass apiKey for Gemini TTS support
-      speakText(feedback, quizConfig.tts, apiKey || undefined);
+      speakText(feedback, ttsConfig, apiKey || undefined);
     }
 
     // If in Play Mode, advance state
@@ -530,18 +566,13 @@ function App() {
         const newQ = await generateReplacementQuestion(apiKey, quizConfig, oldQ.question);
         
         // --- Generate audio for the replacement question if needed ---
-        if (quizConfig.tts.enabled && ttsEnabled) {
+        if (ttsEnabled && ttsConfig.engine === 'gemini') {
             setLoadingMessage("Gerando áudio da nova pergunta...");
             const teamName = quizConfig.isTeamMode ? teams[index % teams.length].name : undefined;
-            const textToRead = getQuestionReadAloudText(newQ, teamName);
-            // This is a single request, so generating speech inside here is fine
-            // Import generateSpeech locally logic or reuse preGenerateQuizAudio logic for single item
-            // For simplicity, we assume next render will handle it or we attach it now
-            // We need to call generateSpeech from service.
-            // Since we can't import generateSpeech directly here easily without changing imports or exporting it from service properly (it is exported).
-             // We can use a trick: create a mini quiz object and pass to preGenerate
+            
+            // Generate single item audio via batch function for simplicity
             const miniQuiz = { title: "", questions: [newQ] };
-            const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, quizConfig.tts, quizConfig.isTeamMode ? [teams[index % teams.length].name] : []);
+            const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, ttsConfig, quizConfig.isTeamMode ? [teams[index % teams.length].name] : []);
             newQ.audioBase64 = processedMini.questions[0].audioBase64;
         }
 
@@ -634,10 +665,10 @@ function App() {
       
       // We are skipping, so we don't necessarily need audio for the next one immediately if we just want to show it,
       // but consistent UX says we should.
-       if (quizConfig.tts.enabled && ttsEnabled) {
+       if (ttsEnabled && ttsConfig.engine === 'gemini') {
              const teamName = quizConfig.isTeamMode ? teams[currentTeamIndex % teams.length].name : undefined;
              const miniQuiz = { title: "", questions: [newQuestion] };
-             const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, quizConfig.tts, quizConfig.isTeamMode ? [teamName || ""] : []);
+             const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, ttsConfig, quizConfig.isTeamMode ? [teamName || ""] : []);
              newQuestion.audioBase64 = processedMini.questions[0].audioBase64;
        }
 
@@ -831,10 +862,10 @@ function App() {
                </p>
             </div>
             
-            {quizConfig?.tts.enabled && ttsEnabled && (
+            {ttsEnabled && ttsConfig.engine === 'gemini' && (
                <div className="bg-jw-hover/50 p-3 rounded-lg text-sm mb-8 flex items-center justify-center gap-2 text-green-500/80">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
-                  Áudio pré-carregado
+                  Áudio IA pré-carregado
                </div>
             )}
 
@@ -935,14 +966,27 @@ function App() {
                  )}
                </button>
 
-               {/* TTS Toggle */}
-               <button 
-                 onClick={handleTTSToggle}
-                 className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!ttsEnabled && 'opacity-50'}`}
-                 title="Narração (TTS)"
-               >
-                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
-               </button>
+               {/* TTS Global Control */}
+               <div className={`flex items-center gap-1 bg-black/10 rounded-lg pr-2 transition-all ${!ttsEnabled ? 'opacity-70' : ''}`}>
+                 <button 
+                   onClick={handleTTSToggle}
+                   className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!ttsEnabled && 'opacity-50'}`}
+                   title="Narração (TTS)"
+                 >
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
+                 </button>
+                 
+                 {ttsEnabled && (
+                    <select 
+                      value={ttsConfig.engine}
+                      onChange={handleTTSEngineChange}
+                      className="bg-transparent text-xs font-bold border-none outline-none text-white cursor-pointer py-1"
+                    >
+                      <option value="browser" className="text-black">Voz Clássica</option>
+                      <option value="gemini" className="text-black">Voz Natural</option>
+                    </select>
+                 )}
+               </div>
 
                {/* Fullscreen Toggle */}
                <button
@@ -1050,7 +1094,7 @@ function App() {
                  hintsRemaining={hintsRemaining}
                  onRevealHint={handleUseHint}
                  activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
-                 ttsConfig={quizConfig?.tts}
+                 ttsConfig={ttsConfig}
                  allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
                  allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
                  onSkip={handleSkipQuestion}
@@ -1134,7 +1178,7 @@ function App() {
                         total={quizData.questions.length}
                         showAnswerKey={userAnswers[reviewIndex] !== null && userAnswers[reviewIndex] !== undefined}
                         forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
-                        ttsConfig={quizConfig?.tts}
+                        ttsConfig={ttsConfig}
                         onVoid={() => handleReplaceQuestion(reviewIndex)}
                         onAnswer={handleAnswer}
                         apiKey={apiKey}

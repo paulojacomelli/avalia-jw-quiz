@@ -42,20 +42,6 @@ export const SetupForm: React.FC<SetupFormProps> = ({
   const [isTeamMode, setIsTeamMode] = useState(false);
   const [teamNames, setTeamNames] = useState<string[]>(['Time A', 'Time B']);
 
-  // --- TTS Config (Local config, but 'enabled' synced with prop at generate time) ---
-  const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
-    enabled: ttsEnabled,
-    autoRead: true,
-    gender: 'female',
-    rate: 1.5, // IMPROVED: Increased speed to 1.5x by default
-    volume: 1.0
-  });
-
-  // Sync local config enabled state with prop if needed
-  useEffect(() => {
-    setTtsConfig(prev => ({ ...prev, enabled: ttsEnabled }));
-  }, [ttsEnabled]);
-
   // Ensure questionsPerRound doesn't exceed total count
   useEffect(() => {
     if (questionsPerRound > count) {
@@ -103,7 +89,15 @@ export const SetupForm: React.FC<SetupFormProps> = ({
       isTeamMode,
       teams: isTeamMode ? teamNames : [],
       questionsPerRound: isTeamMode ? questionsPerRound : count,
-      tts: ttsConfig
+      // Default placeholder tts config, will be overridden by App.tsx global state
+      tts: {
+        enabled: false, 
+        autoRead: true, 
+        engine: 'gemini', 
+        gender: 'female', 
+        rate: 1.5, 
+        volume: 1.0 
+      }
     });
   };
 
@@ -372,7 +366,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
           </div>
         )}
 
-        {/* STEP 3: AJUDAS & ACESSIBILIDADE */}
+        {/* STEP 3: AJUDAS (TTS REMOVED) */}
         {currentStep === 3 && (
           <div className="space-y-6 animate-fade-in">
             {/* Hints Config */}
