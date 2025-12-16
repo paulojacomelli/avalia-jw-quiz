@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TTSConfig, EvaluationResult } from '../types';
 import { playSound, startLoadingDrone, stopLoadingDrone } from '../utils/audio';
-import { speakText, stopSpeech, isSpeaking } from '../utils/tts';
+import { speakText, stopSpeech, isSpeaking, getQuestionReadAloudText } from '../utils/tts';
 import { askAiAboutQuestion, evaluateFreeResponse } from '../services/geminiService';
 
 interface QuizCardProps {
@@ -255,15 +255,9 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     if (isSpeaking()) {
       stopSpeech();
     } else {
-      const teamIntro = activeTeamName ? `Pergunta para ${activeTeamName}. ` : "";
-      let textToRead = `${teamIntro}${question.question}.`;
-      if (isMultipleChoice) {
-        textToRead += ` Alternativa A: ${question.options[0]}. Alternativa B: ${question.options[1]}. Alternativa C: ${question.options[2]}. Alternativa D: ${question.options[3]}.`;
-      } else {
-        textToRead += " Digite ou fale sua resposta.";
-      }
-      // Pass apiKey for Gemini TTS support
-      speakText(textToRead, ttsConfig, apiKey || undefined);
+      const textToRead = getQuestionReadAloudText(question, activeTeamName);
+      // Pass audioBase64 for instant playback if available
+      speakText(textToRead, ttsConfig, apiKey || undefined, question.audioBase64);
     }
   };
 

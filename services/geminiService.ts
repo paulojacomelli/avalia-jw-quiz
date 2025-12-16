@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { QuizConfig, TopicMode, GeneratedQuiz, QuizQuestion, HintType, QuizFormat, EvaluationResult, TTSConfig } from "../types";
+import { getQuestionReadAloudText } from "../utils/tts";
 
 // --- ENTROPIA E VARIABILIDADE ---
 // Esta lista precisa estar aqui para o 'getEntropy' funcionar
@@ -378,3 +379,39 @@ export const generateSpeech = async (apiKey: string, text: string, config: TTSCo
     return null;
   }
 };
+
+// --- PRE-GENERATE AUDIO BATCH ---
+export const preGenerateQuizAudio = async (apiKey: string, quiz: GeneratedQuiz, ttsConfig: TTSConfig, teamNames: string[] = []): Promise<GeneratedQuiz> => {
+    if (!apiKey) return quiz;
+
+    const updatedQuestions = [...quiz.questions];
+
+    // Process sequentially to allow loading indication and reduce rate limit hits (though parallel is possible with batching)
+    for (let i = 0; i < updatedQuestions.length; i++) {
+        const q = updatedQuestions[i];
+        
+        // Determine active team for intro if needed (approximation based on current logic)
+        let activeTeamName = "";
+        if (teamNames.length > 0) {
+            activeTeamName = teamNames[i % teamNames.length];
+        }
+
+        const textToRead = getQuestionReadAloudText(q, activeTeamName);
+        
+        // Generate Audio
+        try {
+            const audioBase64 = await generateSpeech(apiKey, textToRead, ttsConfig);
+            if (audioBase64) {
+                updatedQuestions[i].audioBase64 = audioBase64;
+            }
+        } catch (e) {
+            console.warn(`Failed to generate audio for question ${i+1}`, e);
+            // Continue without audio for this question
+        }
+    }
+
+    return {
+        ...quiz,
+        questions: updatedQuestions
+    };
+}

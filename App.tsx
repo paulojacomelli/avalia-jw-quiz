@@ -3,13 +3,13 @@ import { SetupForm } from './components/SetupForm';
 import { QuizCard } from './components/QuizCard';
 import { LoginScreen } from './components/LoginScreen';
 import { useAuth } from './contexts/AuthContext';
-import { generateQuizContent, generateReplacementQuestion } from './services/geminiService';
+import { generateQuizContent, generateReplacementQuestion, preGenerateQuizAudio } from './services/geminiService';
 import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
 import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
-import { speakText, stopSpeech } from './utils/tts';
+import { speakText, stopSpeech, getQuestionReadAloudText } from './utils/tts';
 import { LOADING_MESSAGES } from './constants';
 
-type GameState = 'SETUP' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
+type GameState = 'SETUP' | 'READY_CHECK' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
 type Theme = 'light' | 'dark';
 
 function App() {
@@ -111,9 +111,11 @@ function App() {
   useEffect(() => {
     if (loading) {
       startLoadingDrone();
-      // Pick a random message
-      const randomMsg = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
-      setLoadingMessage(randomMsg);
+      // Pick a random message only if not overriding with specific status
+      if (!loadingMessage.includes("narração")) {
+        const randomMsg = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
+        setLoadingMessage(randomMsg);
+      }
     } else {
       stopLoadingDrone();
     }
@@ -175,19 +177,17 @@ function App() {
     if (gameState === 'PLAYING' && quizData && shouldRead && !isCurrentQuestionAnswered && !isSkipping && cooldownTime === 0) {
       const timeout = setTimeout(() => {
         const q = quizData.questions[currentQuestionIndex];
-        const teamIntro = quizConfig?.isTeamMode ? `Pergunta para ${teams[currentTeamIndex].name}. ` : "";
+        const teamIntro = quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined;
         
-        let textToRead = `${teamIntro}${q.question}.`;
+        // If we have pre-generated audio, use it directly via speakText which now handles it
+        // If not, it falls back to generation (though generation handles pre-gen too)
         
-        if (q.options && q.options.length > 0) {
-             textToRead += ` Alternativa A: ${q.options[0]}. Alternativa B: ${q.options[1]}. Alternativa C: ${q.options[2]}. Alternativa D: ${q.options[3]}.`;
-        } else {
-             textToRead += " Responda à pergunta.";
-        }
+        // Reconstruct text for fallback or if needed, but pass audioBase64 if present
+        const textToRead = getQuestionReadAloudText(q, teamIntro);
 
         if (quizConfig?.tts) {
-          // Pass apiKey for Gemini TTS support
-          speakText(textToRead, quizConfig.tts, apiKey || undefined);
+          // Pass apiKey and the pre-generated audio
+          speakText(textToRead, quizConfig.tts, apiKey || undefined, q.audioBase64);
         }
       }, 500);
       return () => {
@@ -213,7 +213,9 @@ function App() {
         e.preventDefault(); 
 
         // Context-aware action
-        if (gameState === 'PLAYING' && isCurrentQuestionAnswered) {
+        if (gameState === 'READY_CHECK') {
+          handleConfirmStart();
+        } else if (gameState === 'PLAYING' && isCurrentQuestionAnswered) {
           handleNextQuestion();
         } else if (gameState === 'ROUND_SUMMARY') {
           handleNextRound();
@@ -287,6 +289,7 @@ function App() {
     };
 
     setLoading(true);
+    setLoadingMessage("Gerando perguntas..."); // Initial message
     setError(null);
     setQuizData(null);
     setQuizConfig(finalConfig);
@@ -294,30 +297,42 @@ function App() {
     setHintsRemaining(finalConfig.maxHints);
     setCooldownTime(0);
     
+    let tempTeams: Team[] = [];
     if (finalConfig.isTeamMode) {
-      setTeams(finalConfig.teams.map((name, idx) => ({
+      tempTeams = finalConfig.teams.map((name, idx) => ({
         id: `team-${idx}`,
         name,
         score: 0,
         correctCount: 0,
         wrongCount: 0,
         hintsUsed: 0
-      })));
+      }));
     } else {
-      setTeams([{
+      tempTeams = [{
         id: 'solo',
         name: 'Você',
         score: 0,
         correctCount: 0,
         wrongCount: 0,
         hintsUsed: 0
-      }]);
+      }];
     }
+    setTeams(tempTeams);
 
     try {
-      const data = await generateQuizContent(apiKey, finalConfig);
+      let data = await generateQuizContent(apiKey, finalConfig);
+      
+      // --- PRE-GENERATE AUDIO IF TTS IS ENABLED ---
+      if (finalConfig.tts.enabled && ttsEnabled) {
+          setLoadingMessage("Gerando narração com IA (isso pode levar alguns segundos)...");
+          // Extract just team names for the generator
+          const teamNameList = tempTeams.map(t => t.name);
+          data = await preGenerateQuizAudio(apiKey, data, finalConfig.tts, finalConfig.isTeamMode ? teamNameList : []);
+      }
+
       setQuizData(data);
-      startCountdownSequence(finalConfig.timeLimit);
+      // Change: Move to READY_CHECK instead of starting directly
+      setGameState('READY_CHECK');
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -330,6 +345,13 @@ function App() {
       stopSpeech();
       handleGenerate(quizConfig);
     }
+  };
+
+  const handleConfirmStart = () => {
+    if (!quizConfig) return;
+    playSound('click');
+    resumeAudioContext(); // Double check audio context is active on this click
+    startCountdownSequence(quizConfig.timeLimit);
   };
 
   const startCountdownSequence = (limit: number) => {
@@ -425,12 +447,29 @@ function App() {
   const handleReplaceQuestion = async (index: number) => {
     if (!quizData || !quizConfig || !apiKey) return;
     setLoading(true);
+    setLoadingMessage("Substituindo pergunta...");
     playSound('click');
 
     try {
         const oldQ = quizData.questions[index];
         const newQ = await generateReplacementQuestion(apiKey, quizConfig, oldQ.question);
         
+        // --- Generate audio for the replacement question if needed ---
+        if (quizConfig.tts.enabled && ttsEnabled) {
+            setLoadingMessage("Gerando áudio da nova pergunta...");
+            const teamName = quizConfig.isTeamMode ? teams[index % teams.length].name : undefined;
+            const textToRead = getQuestionReadAloudText(newQ, teamName);
+            // This is a single request, so generating speech inside here is fine
+            // Import generateSpeech locally logic or reuse preGenerateQuizAudio logic for single item
+            // For simplicity, we assume next render will handle it or we attach it now
+            // We need to call generateSpeech from service.
+            // Since we can't import generateSpeech directly here easily without changing imports or exporting it from service properly (it is exported).
+             // We can use a trick: create a mini quiz object and pass to preGenerate
+            const miniQuiz = { title: "", questions: [newQ] };
+            const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, quizConfig.tts, quizConfig.isTeamMode ? [teams[index % teams.length].name] : []);
+            newQ.audioBase64 = processedMini.questions[0].audioBase64;
+        }
+
         const teamIdx = index % teams.length;
         const previousAnswer = userAnswers[index];
         
@@ -517,6 +556,15 @@ function App() {
       const nextDiff = getNextDifficulty(quizConfig.difficulty);
       const tempConfig = { ...quizConfig, difficulty: nextDiff };
       const newQuestion = await generateReplacementQuestion(apiKey, tempConfig, currentQ.question);
+      
+      // We are skipping, so we don't necessarily need audio for the next one immediately if we just want to show it,
+      // but consistent UX says we should.
+       if (quizConfig.tts.enabled && ttsEnabled) {
+             const teamName = quizConfig.isTeamMode ? teams[currentTeamIndex % teams.length].name : undefined;
+             const miniQuiz = { title: "", questions: [newQuestion] };
+             const processedMini = await preGenerateQuizAudio(apiKey, miniQuiz, quizConfig.tts, quizConfig.isTeamMode ? [teamName || ""] : []);
+             newQuestion.audioBase64 = processedMini.questions[0].audioBase64;
+       }
 
       const newQuestions = [...quizData.questions];
       newQuestions[currentQuestionIndex] = newQuestion;
@@ -644,6 +692,45 @@ function App() {
             Cancelar e Voltar ao Início
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // READY CHECK SCREEN (New)
+  if (gameState === 'READY_CHECK') {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-jw-dark text-jw-text transition-colors duration-300 z-50 animate-fade-in px-4">
+         <div className="bg-jw-card p-8 md:p-12 rounded-3xl shadow-2xl text-center border border-gray-700 max-w-lg w-full">
+            <div className="w-20 h-20 bg-jw-blue/20 rounded-full flex items-center justify-center mx-auto mb-6 text-jw-blue">
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10">
+                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+               </svg>
+            </div>
+            
+            <h2 className="text-2xl md:text-3xl font-bold mb-6 text-jw-text">Tudo pronto?</h2>
+            
+            <div className="mb-8">
+               <span className="block text-xs md:text-sm font-bold uppercase tracking-widest opacity-50 mb-2">Tema</span>
+               <p className="text-xl md:text-2xl font-medium leading-relaxed">
+                 {quizData?.title || "Seu quiz foi gerado com sucesso."}
+               </p>
+            </div>
+            
+            {quizConfig?.tts.enabled && ttsEnabled && (
+               <div className="bg-jw-hover/50 p-3 rounded-lg text-sm mb-8 flex items-center justify-center gap-2 text-green-500/80">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+                  Áudio pré-carregado
+               </div>
+            )}
+
+            <button 
+              onClick={handleConfirmStart}
+              className="w-full bg-jw-blue text-white font-bold py-4 px-8 rounded-xl shadow-lg hover:bg-opacity-90 transition-transform active:scale-95 text-lg flex items-center justify-center gap-2"
+            >
+              Estou Pronto
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
+            </button>
+         </div>
       </div>
     );
   }

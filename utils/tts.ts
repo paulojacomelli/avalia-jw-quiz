@@ -1,6 +1,6 @@
 import { generateSpeech } from '../services/geminiService';
 import { playAudioData, stopCurrentAudio } from './audio';
-import { TTSConfig } from '../types';
+import { TTSConfig, QuizQuestion } from '../types';
 
 // State to track if we are currently speaking via Gemini Audio
 let isSpeakingState = false;
@@ -8,11 +8,44 @@ let isSpeakingState = false;
 // Fallback legacy Web Speech API for when API Key is missing (should rarely happen in this flow)
 let synth: SpeechSynthesis | null = typeof window !== 'undefined' ? window.speechSynthesis : null;
 
-export const speakText = async (text: string, config: TTSConfig, apiKey?: string) => {
+// Helper to construct consistent text for reading
+export const getQuestionReadAloudText = (question: QuizQuestion, activeTeamName?: string): string => {
+  const teamIntro = activeTeamName ? `Pergunta para ${activeTeamName}. ` : "";
+  let textToRead = `${teamIntro}${question.question}.`;
+  
+  if (question.options && question.options.length > 0) {
+    // Check if it is True/False to read naturally
+    if (question.options.length === 2 && question.options[0] === "Verdadeiro") {
+        textToRead += " Verdadeiro ou Falso?";
+    } else {
+        textToRead += ` Alternativa A: ${question.options[0]}. Alternativa B: ${question.options[1]}.`;
+        if (question.options.length > 2) textToRead += ` Alternativa C: ${question.options[2]}.`;
+        if (question.options.length > 3) textToRead += ` Alternativa D: ${question.options[3]}.`;
+    }
+  } else {
+    textToRead += " Digite ou fale sua resposta.";
+  }
+  return textToRead;
+};
+
+export const speakText = async (text: string, config: TTSConfig, apiKey?: string, preGeneratedAudio?: string) => {
   // Stop any ongoing speech (both Gemini Audio and Browser TTS)
   stopSpeech();
 
-  if (!text) return;
+  if (!text && !preGeneratedAudio) return;
+
+  // 0. Use Pre-generated Audio if available (Instant Playback)
+  if (preGeneratedAudio) {
+      try {
+          isSpeakingState = true;
+          await playAudioData(preGeneratedAudio, config.rate);
+      } catch (e) {
+          console.error("Error playing pre-generated audio", e);
+      } finally {
+          isSpeakingState = false;
+      }
+      return;
+  }
 
   // 1. Prefer Gemini TTS if API Key is available
   if (apiKey) {
@@ -23,18 +56,11 @@ export const speakText = async (text: string, config: TTSConfig, apiKey?: string
           
           if (audioBase64) {
              // Play the audio with the requested rate (speed)
-             // Default rate in app is 1.5 per request
              await playAudioData(audioBase64, config.rate);
           }
       } catch (error) {
           console.error("Gemini TTS Failed", error);
       } finally {
-          // Note: playAudioData is async but fires and forgets the source.onended
-          // Ideally we track the buffer source state in audio.ts, but for simple toggling this suffices.
-          // We set this to false immediately after dispatching play, 
-          // or we could track it via the audio context.
-          // For now, let's assume 'speaking' is true while processing, 
-          // but effective playback happens in audio.ts.
           isSpeakingState = false; 
       }
       return;
@@ -46,6 +72,8 @@ export const speakText = async (text: string, config: TTSConfig, apiKey?: string
       utterance.lang = 'pt-BR';
       utterance.rate = config.rate;
       utterance.volume = config.volume;
+      utterance.onend = () => { isSpeakingState = false; };
+      isSpeakingState = true;
       synth.speak(utterance);
   }
 };
@@ -64,8 +92,5 @@ export const stopSpeech = () => {
 export const isSpeaking = () => {
   // Check both systems
   const browserSpeaking = synth ? synth.speaking : false;
-  // Note: audio.ts tracks `currentTtsSource` internally, 
-  // but we don't expose it directly here. 
-  // For UI toggles, stopping blindly is usually safer than checking state.
   return browserSpeaking || isSpeakingState; 
 };

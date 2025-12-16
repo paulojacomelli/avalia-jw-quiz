@@ -32,6 +32,7 @@ export interface QuizQuestion {
   reference: string; // e.g., "Mateus 24:14" or "w23.01 p. 5"
   hint: string; // Friendly clue
   explanation: string; // Brief justification for the answer
+  audioBase64?: string; // Pre-generated TTS audio data
 }
 
 export interface Team {
