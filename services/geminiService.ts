@@ -68,10 +68,31 @@ const getFormatInstruction = (config: QuizConfig) => {
   }
 };
 
-export const generateQuizContent = async (config: QuizConfig): Promise<GeneratedQuiz> => {
-  const apiKey = process.env.API_KEY;
+// Validate Key Function
+export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+  if (!apiKey) return false;
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    // Minimal request to check validity. We expect a text response.
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: "Reply 'OK' if you can read this.",
+    });
+    
+    // If we get a response and it has text, the key is valid and the model is accessible
+    if (response && response.text) {
+        return true;
+    }
+    return false;
+  } catch (error) {
+    console.warn("Key validation failed:", error);
+    return false;
+  }
+};
+
+export const generateQuizContent = async (apiKey: string, config: QuizConfig): Promise<GeneratedQuiz> => {
   if (!apiKey) {
-    throw new Error("Chave de API não encontrada.");
+    throw new Error("Chave de API não fornecida.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -140,9 +161,8 @@ export const generateQuizContent = async (config: QuizConfig): Promise<Generated
   }
 };
 
-export const generateReplacementQuestion = async (config: QuizConfig, avoidQuestionText: string): Promise<QuizQuestion> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chave de API não encontrada.");
+export const generateReplacementQuestion = async (apiKey: string, config: QuizConfig, avoidQuestionText: string): Promise<QuizQuestion> => {
+  if (!apiKey) throw new Error("Chave de API não fornecida.");
 
   const ai = new GoogleGenAI({ apiKey });
   const topicPrompt = getTopicPrompt(config);
@@ -202,9 +222,8 @@ export const generateReplacementQuestion = async (config: QuizConfig, avoidQuest
 };
 
 // Evaluate user's free text response
-export const evaluateFreeResponse = async (question: string, modelAnswer: string, userAnswer: string): Promise<EvaluationResult> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chave de API não encontrada.");
+export const evaluateFreeResponse = async (apiKey: string, question: string, modelAnswer: string, userAnswer: string): Promise<EvaluationResult> => {
+  if (!apiKey) throw new Error("Chave de API não fornecida.");
 
   const ai = new GoogleGenAI({ apiKey });
 
@@ -252,9 +271,8 @@ export const evaluateFreeResponse = async (question: string, modelAnswer: string
 };
 
 // New function for Strategic AI Hint
-export const askAiAboutQuestion = async (question: QuizQuestion, userQuery: string): Promise<string> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chave de API não encontrada.");
+export const askAiAboutQuestion = async (apiKey: string, question: QuizQuestion, userQuery: string): Promise<string> => {
+  if (!apiKey) throw new Error("Chave de API não fornecida.");
 
   const ai = new GoogleGenAI({ apiKey });
 

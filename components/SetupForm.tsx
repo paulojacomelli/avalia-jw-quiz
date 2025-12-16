@@ -326,6 +326,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                     value={timeLimit} onChange={(e) => setTimeLimit(Number(e.target.value))}
                     className="bg-jw-card border border-gray-500 rounded text-xs p-1"
                    >
+                     <option value="5">5s</option>
                      <option value="30">30s</option>
                      <option value="60">60s</option>
                      <option value="90">90s</option>

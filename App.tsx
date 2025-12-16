@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SetupForm } from './components/SetupForm';
 import { QuizCard } from './components/QuizCard';
+import { LoginScreen } from './components/LoginScreen';
+import { useAuth } from './contexts/AuthContext';
 import { generateQuizContent, generateReplacementQuestion } from './services/geminiService';
 import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
 import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
@@ -10,6 +12,8 @@ type GameState = 'SETUP' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED
 type Theme = 'light' | 'dark';
 
 function App() {
+  const { isAuthenticated, apiKey, logout } = useAuth();
+  
   const [quizConfig, setQuizConfig] = useState<QuizConfig | null>(null);
   const [quizData, setQuizData] = useState<GeneratedQuiz | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,7 +36,7 @@ function App() {
   // Skip State
   const [isSkipping, setIsSkipping] = useState(false);
   
-  // Voided Questions State (No longer used for simple void, but kept for compatibility or future use if needed, effectively cleared on replace)
+  // Voided Questions State
   const [voidedIndices, setVoidedIndices] = useState<Set<number>>(new Set());
   
   // Teams State
@@ -234,6 +238,11 @@ function App() {
   };
 
   const handleGenerate = async (config: QuizConfig) => {
+    if (!apiKey) {
+      setError("Erro de autenticação: API Key não encontrada.");
+      return;
+    }
+
     // Attempt to resume audio context on user gesture
     resumeAudioContext();
 
@@ -275,7 +284,7 @@ function App() {
     }
 
     try {
-      const data = await generateQuizContent(finalConfig);
+      const data = await generateQuizContent(apiKey, finalConfig);
       setQuizData(data);
       startCountdownSequence(finalConfig.timeLimit);
     } catch (err: any) {
@@ -382,13 +391,13 @@ function App() {
   };
 
   const handleReplaceQuestion = async (index: number) => {
-    if (!quizData || !quizConfig) return;
+    if (!quizData || !quizConfig || !apiKey) return;
     setLoading(true);
     playSound('click');
 
     try {
         const oldQ = quizData.questions[index];
-        const newQ = await generateReplacementQuestion(quizConfig, oldQ.question);
+        const newQ = await generateReplacementQuestion(apiKey, quizConfig, oldQ.question);
         
         const teamIdx = index % teams.length;
         const previousAnswer = userAnswers[index];
@@ -465,7 +474,7 @@ function App() {
   };
 
   const handleSkipQuestion = async () => {
-    if (!quizData || !quizConfig || isSkipping) return;
+    if (!quizData || !quizConfig || isSkipping || !apiKey) return;
 
     stopSpeech();
     setIsSkipping(true);
@@ -475,7 +484,7 @@ function App() {
       const currentQ = quizData.questions[currentQuestionIndex];
       const nextDiff = getNextDifficulty(quizConfig.difficulty);
       const tempConfig = { ...quizConfig, difficulty: nextDiff };
-      const newQuestion = await generateReplacementQuestion(tempConfig, currentQ.question);
+      const newQuestion = await generateReplacementQuestion(apiKey, tempConfig, currentQ.question);
 
       const newQuestions = [...quizData.questions];
       newQuestions[currentQuestionIndex] = newQuestion;
@@ -552,6 +561,12 @@ function App() {
     if (percentage > 20) return 'bg-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
     return 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-bounce';
   };
+
+  // --- RENDERING ---
+
+  if (!isAuthenticated) {
+    return <LoginScreen />;
+  }
 
   if (loading) {
      return (
@@ -782,13 +797,13 @@ function App() {
                  isTimeUp={quizConfig?.enableTimer && timeLeft === 0}
                  hintsRemaining={hintsRemaining}
                  onRevealHint={handleUseHint}
-                 // Props for new features
                  activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
                  ttsConfig={quizConfig?.tts}
                  allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
                  allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
                  onSkip={handleSkipQuestion}
                  isSkipping={isSkipping}
+                 apiKey={apiKey}
                />
              </div>
           </div>
@@ -865,12 +880,12 @@ function App() {
                         question={quizData.questions[reviewIndex]} 
                         index={reviewIndex} 
                         total={quizData.questions.length}
-                        // Only show answer key if it hasn't been reset (voided/replaced)
                         showAnswerKey={userAnswers[reviewIndex] !== null && userAnswers[reviewIndex] !== undefined}
                         forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
                         ttsConfig={quizConfig?.tts}
-                        onVoid={() => handleReplaceQuestion(reviewIndex)} // Renamed action to Replace
-                        onAnswer={handleAnswer} // Pass handleAnswer to allow answering the new question
+                        onVoid={() => handleReplaceQuestion(reviewIndex)}
+                        onAnswer={handleAnswer}
+                        apiKey={apiKey}
                     />
                  </div>
                  <div className="flex justify-between items-center mt-8 pb-4">
@@ -887,12 +902,17 @@ function App() {
       {/* FAB Next */}
       {gameState === 'PLAYING' && isCurrentQuestionAnswered && (
          <div className="fixed bottom-8 right-4 md:right-8 z-50 animate-fade-in-up">
-           <button onClick={handleNextQuestion} onMouseEnter={() => playSound('hover')} className="bg-jw-blue text-white font-bold py-3 px-6 md:px-8 rounded-full shadow-lg hover:bg-white transition-all transform active:scale-95 flex items-center gap-2 text-sm md:text-base">
+           <button onClick={handleNextQuestion} onMouseEnter={() => playSound('hover')} className="bg-jw-blue text-white font-bold py-3 px-6 md:px-8 rounded-full shadow-lg hover:bg-white hover:text-jw-blue transition-all transform active:scale-95 flex items-center gap-2 text-sm md:text-base">
              {(currentQuestionIndex < (quizData?.questions.length || 0) - 1) && ((currentQuestionIndex + 1) % (quizConfig?.questionsPerRound || 999) !== 0) ? 'Avançar' : 'Concluir Fase'}
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
            </button>
          </div>
       )}
+
+      {/* Footer / Change Key */}
+      <footer className="shrink-0 py-2 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity">
+        <button onClick={logout} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
+      </footer>
     </div>
   );
 }

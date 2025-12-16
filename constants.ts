@@ -34,6 +34,7 @@ export const FORMAT_OPTIONS = [
 ];
 
 export const TIME_OPTIONS = [
+  { value: 5, label: "5s" },
   { value: 30, label: "30s" },
   { value: 60, label: "1 min" },
   { value: 90, label: "1m 30s" },

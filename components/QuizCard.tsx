@@ -24,6 +24,7 @@ interface QuizCardProps {
   isSkipping?: boolean;
   onVoid?: () => void;
   isVoided?: boolean;
+  apiKey?: string | null;
 }
 
 export const QuizCard: React.FC<QuizCardProps> = ({ 
@@ -45,6 +46,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   isSkipping = false,
   onVoid,
   isVoided = false,
+  apiKey
 }) => {
   // State for MC/TF
   const [internalSelectedOption, setInternalSelectedOption] = useState<number | null>(null);
@@ -157,11 +159,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   };
 
   const handleSubmitFreeResponse = async () => {
-    if (!textAnswer.trim() || isEvaluating || isSkipping || evaluationResult) return;
+    if (!textAnswer.trim() || isEvaluating || isSkipping || evaluationResult || !apiKey) return;
     setIsEvaluating(true);
     playSound('click');
     try {
-      const result = await evaluateFreeResponse(question.question, question.correctAnswerText || '', textAnswer);
+      const result = await evaluateFreeResponse(apiKey, question.question, question.correctAnswerText || '', textAnswer);
       setEvaluationResult(result);
       if (onAnswer) onAnswer({ score: result.score, isCorrect: result.isCorrect, textAnswer: textAnswer });
     } catch (e) {
@@ -232,11 +234,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
   const handleSubmitAskAi = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!askInput.trim()) return;
+    if (!askInput.trim() || !apiKey) return;
     setIsAskLoading(true);
     playSound('click');
     try {
-      const response = await askAiAboutQuestion(question, askInput);
+      const response = await askAiAboutQuestion(apiKey, question, askInput);
       setAskResponse(response);
     } catch (error) {
       setAskResponse("Desculpe, não consegui conectar ao chat agora.");
@@ -604,11 +606,13 @@ export const QuizCard: React.FC<QuizCardProps> = ({
          <div className="mt-8 pt-4 border-t border-gray-700/30 flex justify-end relative z-20">
             <button 
                onClick={onVoid}
-               className="text-jw-blue hover:text-white hover:bg-jw-blue border border-jw-blue/50 text-sm font-bold flex items-center gap-2 px-4 py-2 rounded-full transition-all"
+               className="text-jw-blue hover:text-white hover:bg-jw-blue border border-jw-blue text-sm font-bold flex items-center gap-2 px-4 py-2 rounded-full transition-all"
                title="Gerar uma nova pergunta para tentar responder novamente"
             >
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
-               Substituir por Nova Pergunta
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+               </svg>
+               Contestar / Substituir
             </button>
          </div>
       )}
