@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { SetupForm } from './components/SetupForm';
 import { QuizCard } from './components/QuizCard';
 import { LoginScreen } from './components/LoginScreen';
@@ -964,6 +965,7 @@ function App() {
       <footer className="shrink-0 py-2 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity">
         <button onClick={logout} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
       </footer>
+      <Analytics />
     </div>
   );
 }
