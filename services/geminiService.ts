@@ -1,6 +1,33 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizConfig, TopicMode, GeneratedQuiz, QuizQuestion, HintType, QuizFormat, EvaluationResult } from "../types";
 
+// --- ENTROPIA E VARIABILIDADE ---
+// Esta lista precisa estar aqui para o 'getEntropy' funcionar
+const HIDDEN_THEMES = [
+  "Foque em profecias menores e seus cumprimentos.",
+  "Foque em detalhes geográficos e viagens missionárias.",
+  "Foque em mulheres de fé do Antigo e Novo Testamento.",
+  "Foque em detalhes da Lei Mosaica e seus princípios.",
+  "Foque em ilustrações e parábolas de Jesus menos citadas.",
+  "Foque na construção do Tabernáculo e do Templo.",
+  "Foque nos Reis de Judá e Israel (bons e maus).",
+  "Foque nos Profetas Menores (Oseias a Malaquias).",
+  "Foque em qualidades (Fruto do Espírito) e aplicação prática.",
+  "Foque em animais, plantas e medidas usadas na Bíblia.",
+  "Foque em números bíblicos e cronologia.",
+  "Misture tudo, mas dê preferência a personagens 'coadjuvantes' da Bíblia."
+];
+
+// Função para pegar um tema aleatório e injetar ruído
+const getEntropy = () => {
+  const randomIndex = Math.floor(Math.random() * HIDDEN_THEMES.length);
+  const timestamp = Date.now(); // Garante que o prompt nunca seja idêntico
+  return {
+    theme: HIDDEN_THEMES[randomIndex],
+    seed: timestamp
+  };
+};
+
 // Utility to strip markdown code blocks if present
 const cleanJson = (text: string): string => {
   if (!text) return "";
@@ -99,11 +126,22 @@ export const generateQuizContent = async (apiKey: string, config: QuizConfig): P
   const topicPrompt = getTopicPrompt(config);
   const formatInstruction = getFormatInstruction(config);
   
+  // Entropia
+  const entropy = getEntropy();
+  const entropyInstruction = config.mode === TopicMode.GENERAL 
+    ? `VARIAÇÃO OBRIGATÓRIA: O foco deste quiz deve ser: ${entropy.theme}` 
+    : "";
+
   const prompt = `
     Crie um quiz com ${config.count} perguntas.
     Tema: ${topicPrompt}.
     Dificuldade: ${config.difficulty}.
     ${formatInstruction}
+
+    ${entropyInstruction}
+    Seed de Aleatoriedade: ${entropy.seed}
+
+    EVITE CLICHÊS: Não faça perguntas óbvias demais (ex: Quem matou Golias?). Não repita o mesmo personagem no mesmo quiz.
     
     Para cada pergunta:
     1. Siga o formato estipulado acima.
@@ -116,6 +154,7 @@ export const generateQuizContent = async (apiKey: string, config: QuizConfig): P
     model: "gemini-2.5-flash",
     contents: prompt,
     config: {
+      temperature: config.temperature, // Using user-defined temperature
       systemInstruction: getSystemInstruction(),
       responseMimeType: "application/json",
       responseSchema: {
@@ -173,6 +212,8 @@ export const generateReplacementQuestion = async (apiKey: string, config: QuizCo
     Tema: ${topicPrompt}.
     Dificuldade: ${config.difficulty}.
     IMPORTANTE: A pergunta NÃO PODE SER igual ou muito parecida com esta: "${avoidQuestionText}".
+    
+    EVITE CLICHÊS: Busque um detalhe interessante e não óbvio.
     ${formatInstruction}
     
     Estrutura:
@@ -188,6 +229,7 @@ export const generateReplacementQuestion = async (apiKey: string, config: QuizCo
     model: "gemini-2.5-flash",
     contents: prompt,
     config: {
+      temperature: config.temperature, // Using user-defined temperature
       systemInstruction: getSystemInstruction(),
       responseMimeType: "application/json",
       responseSchema: {

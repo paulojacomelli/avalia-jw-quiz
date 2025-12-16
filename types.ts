@@ -1,3 +1,4 @@
+
 export enum Difficulty {
   EASY = 'Fácil',
   MEDIUM = 'Médio',
@@ -55,6 +56,7 @@ export interface QuizConfig {
   book?: string;
   specificTopic?: string; // New field for user typed topic
   difficulty: Difficulty;
+  temperature: number; // New field for creativity level
   quizFormat: QuizFormat;
   count: number;
   timeLimit: number; // Seconds per question

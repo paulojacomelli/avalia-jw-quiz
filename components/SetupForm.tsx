@@ -24,6 +24,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
   const [book, setBook] = useState<string>(BIBLE_BOOKS[0]);
   const [specificTopic, setSpecificTopic] = useState<string>('');
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.MEDIUM);
+  const [temperature, setTemperature] = useState<number>(1.0); // Default balanced temperature
   const [quizFormat, setQuizFormat] = useState<QuizFormat>(QuizFormat.MULTIPLE_CHOICE);
   const [count, setCount] = useState<number>(10);
   const [questionsPerRound, setQuestionsPerRound] = useState<number>(5);
@@ -91,6 +92,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
       book: mode === TopicMode.BOOK ? book : undefined,
       specificTopic: mode === TopicMode.SPECIFIC ? specificTopic : undefined,
       difficulty,
+      temperature,
       quizFormat,
       count,
       enableTimer,
@@ -225,6 +227,32 @@ export const SetupForm: React.FC<SetupFormProps> = ({
                     </div>
                   </label>
                 ))}
+              </div>
+            </div>
+
+            {/* Temperature Slider */}
+            <div className="animate-fade-in">
+              <div className="flex justify-between mb-2">
+                <label className="block text-sm font-bold text-gray-700 dark:text-gray-200">
+                  Criatividade
+                </label>
+                <span className="text-sm font-mono font-bold text-jw-blue bg-jw-blue/10 px-2 py-0.5 rounded">
+                  {temperature.toFixed(1)}
+                </span>
+              </div>
+              <input 
+                type="range" 
+                min="0.5" 
+                max="1.5" 
+                step="0.1" 
+                value={temperature} 
+                onChange={(e) => setTemperature(parseFloat(e.target.value))} 
+                className="w-full h-2 bg-gray-300 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-jw-blue touch-none"
+              />
+              <div className="flex justify-between text-[10px] text-gray-500 mt-1 uppercase tracking-wider">
+                 <span>Conservador</span>
+                 <span>Equilibrado</span>
+                 <span>Criativo</span>
               </div>
             </div>
             
