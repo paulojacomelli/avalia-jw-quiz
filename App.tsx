@@ -12,13 +12,23 @@ import { LOADING_MESSAGES } from './constants';
 type GameState = 'SETUP' | 'READY_CHECK' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
 type Theme = 'light' | 'dark';
 
+// Structured Error Interface
+interface ApiErrorDetail {
+  title: string;
+  message: string;
+  solution: string;
+  code: string;
+}
+
 function App() {
   const { isAuthenticated, apiKey, logout } = useAuth();
   
   const [quizConfig, setQuizConfig] = useState<QuizConfig | null>(null);
   const [quizData, setQuizData] = useState<GeneratedQuiz | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  
+  // Replaced generic string error with structured object
+  const [errorDetail, setErrorDetail] = useState<ApiErrorDetail | null>(null);
   
   // App Preferences (Global State)
   const [theme, setTheme] = useState<Theme>('dark');
@@ -206,8 +216,8 @@ function App() {
         const tagName = (e.target as HTMLElement).tagName;
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
         
-        // Prevent action if in cooldown
-        if (cooldownTime > 0) return;
+        // Prevent action if in cooldown or error state
+        if (cooldownTime > 0 || errorDetail) return;
 
         // Prevent page scroll for space and button clicks for enter to avoid double triggering
         e.preventDefault(); 
@@ -228,7 +238,7 @@ function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [gameState, isCurrentQuestionAnswered, isReviewing, reviewIndex, quizData, currentQuestionIndex, cooldownTime]);
+  }, [gameState, isCurrentQuestionAnswered, isReviewing, reviewIndex, quizData, currentQuestionIndex, cooldownTime, errorDetail]);
 
   const handleSoundToggle = () => {
     const newState = !soundEnabled;
@@ -256,23 +266,88 @@ function App() {
     }
   };
 
-  // Centralized Error Handling for API Calls
-  const handleApiError = (err: any) => {
-    const msg = err?.message || String(err);
-    console.error("API Error:", msg);
+  // --- ROBUST ERROR HANDLING ---
+
+  const parseApiError = (err: any): ApiErrorDetail => {
+    const msg = (err?.message || String(err)).toLowerCase();
     
-    // Check for Quota Exceeded (429) or specific text
-    if (msg.includes('quota') || msg.includes('429') || msg.includes('exceeded')) {
-      setCooldownTime(60); // Set 60 seconds cooldown
-      stopSpeech();
-    } else {
-      setError("Ocorreu um erro ao conectar com a IA. Verifique sua internet ou tente novamente.");
+    // 429: Quota Exceeded
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
+        return {
+            code: '429',
+            title: 'Limite de Uso Excedido',
+            message: 'A cota gratuita da API do Google foi atingida temporariamente. Muitas requisições em pouco tempo.',
+            solution: 'O sistema entrará em pausa automática por 60 segundos. Aguarde o contador.'
+        };
     }
+    // 400/403: Invalid Key or Permission
+    if (msg.includes('400') || msg.includes('403') || msg.includes('key') || msg.includes('permission') || msg.includes('unauthenticated')) {
+        return {
+            code: '403',
+            title: 'Chave de API Inválida',
+            message: 'A chave fornecida foi rejeitada pelo Google. Ela pode estar incorreta, expirada ou o projeto no Google Cloud pode estar sem permissão.',
+            solution: 'Tente fazer logout e inserir a chave novamente. Verifique se a chave está ativa no Google AI Studio.'
+        };
+    }
+    // 500/503: Server Errors
+    if (msg.includes('500') || msg.includes('503') || msg.includes('overloaded') || msg.includes('internal') || msg.includes('unavailable')) {
+        return {
+            code: '503',
+            title: 'Serviço Indisponível',
+            message: 'Os servidores da IA do Google estão instáveis ou sobrecarregados neste momento.',
+            solution: 'Isso é temporário. Aguarde alguns instantes e tente novamente.'
+        };
+    }
+    // Safety Blocks
+    if (msg.includes('safety') || msg.includes('blocked') || msg.includes('harmful') || msg.includes('filter')) {
+        return {
+            code: 'SAFETY',
+            title: 'Conteúdo Bloqueado',
+            message: 'A IA recusou gerar este conteúdo devido aos filtros de segurança automáticos.',
+            solution: 'Tente mudar o tema ou a formulação do tópico para algo mais específico.'
+        };
+    }
+    // Network Errors
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('offline') || msg.includes('failed to fetch')) {
+        return {
+            code: 'NET',
+            title: 'Erro de Conexão',
+            message: 'Não foi possível conectar aos servidores do Google.',
+            solution: 'Verifique sua conexão com a internet (Wi-Fi/Dados).'
+        };
+    }
+    
+    // Default / Unknown
+    return {
+        code: 'UNKNOWN',
+        title: 'Erro Desconhecido',
+        message: `Ocorreu um erro inesperado: ${msg.substring(0, 150)}...`,
+        solution: 'Tente novamente. Se o erro persistir, recarregue a página.'
+    };
+  }
+
+  const handleApiError = (err: any) => {
+    const parsed = parseApiError(err);
+    console.error("Parsed Error:", parsed);
+    
+    // Special handling for Quota - activate cooldown timer
+    if (parsed.code === '429') {
+        setCooldownTime(60);
+        stopSpeech();
+    } else {
+        setErrorDetail(parsed); 
+    }
+    setLoading(false);
   };
 
   const handleGenerate = async (config: QuizConfig) => {
     if (!apiKey) {
-      setError("Erro de autenticação: API Key não encontrada.");
+      setErrorDetail({
+        code: 'NO_KEY',
+        title: 'Chave Ausente',
+        message: 'A chave de API não foi encontrada.',
+        solution: 'Faça login novamente.'
+      });
       return;
     }
 
@@ -290,7 +365,7 @@ function App() {
 
     setLoading(true);
     setLoadingMessage("Gerando perguntas..."); // Initial message
-    setError(null);
+    setErrorDetail(null);
     setQuizData(null);
     setQuizConfig(finalConfig);
     setTimeLimit(finalConfig.timeLimit);
@@ -382,7 +457,7 @@ function App() {
     const isReviewPending = isReviewing && userAnswers[reviewIndex] === null;
     const isPlayPending = gameState === 'PLAYING' && !isCurrentQuestionAnswered;
     
-    if ((isPlayPending || isReviewPending) && timeLeft > 0 && !isSkipping && cooldownTime === 0) {
+    if ((isPlayPending || isReviewPending) && timeLeft > 0 && !isSkipping && cooldownTime === 0 && !errorDetail) {
       interval = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
@@ -392,13 +467,13 @@ function App() {
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && (isPlayPending || isReviewPending) && !isSkipping && cooldownTime === 0) {
+    } else if (timeLeft === 0 && (isPlayPending || isReviewPending) && !isSkipping && cooldownTime === 0 && !errorDetail) {
       if (quizConfig?.enableTimerSound) playSound('timeUp');
       handleAnswer({ score: 0, isCorrect: false });
     }
 
     return () => clearInterval(interval);
-  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime, isReviewing, userAnswers, reviewIndex]);
+  }, [timeLeft, gameState, isCurrentQuestionAnswered, quizConfig, timeLimit, isSkipping, cooldownTime, isReviewing, userAnswers, reviewIndex, errorDetail]);
 
   // Handle answers (from both Playing and Review modes)
   const handleAnswer = (result: { score: number, isCorrect: boolean, selectedIndex?: number | null, textAnswer?: string }) => {
@@ -626,7 +701,7 @@ function App() {
   const handleReset = () => {
     stopSpeech();
     setQuizData(null);
-    setError(null);
+    setErrorDetail(null);
     setGameState('SETUP');
     setIsReviewing(false);
     setIsSkipping(false);
@@ -661,6 +736,46 @@ function App() {
           </p>
        </div>
      )
+  }
+
+  // General Error Modal (Replaces simple error div)
+  if (errorDetail && cooldownTime === 0) {
+     return (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in p-4">
+          <div className="bg-jw-card border border-red-500/30 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-red-500"></div>
+            
+            <div className="w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-red-400">
+                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+               </svg>
+            </div>
+  
+            <h2 className="text-xl font-bold mb-2 text-white">{errorDetail.title}</h2>
+            <div className="bg-red-500/10 rounded-lg p-3 mb-4 text-xs font-mono text-red-300 border border-red-500/20 text-left overflow-x-auto whitespace-pre-wrap">
+               Erro: {errorDetail.code}
+            </div>
+            <p className="text-gray-300 mb-6 text-sm leading-relaxed">
+              {errorDetail.message}
+            </p>
+
+            <div className="bg-jw-hover rounded-lg p-4 mb-8 text-left border-l-4 border-jw-blue">
+               <strong className="block text-xs uppercase text-jw-blue mb-1">O que fazer?</strong>
+               <p className="text-sm text-gray-400">{errorDetail.solution}</p>
+            </div>
+  
+            <button 
+              onClick={() => {
+                  setErrorDetail(null);
+                  if (errorDetail.code === '403') logout(); // If key error, logout
+              }} 
+              className="w-full bg-jw-blue hover:bg-opacity-90 text-white font-bold py-3 px-6 rounded-lg transition-colors"
+            >
+              {errorDetail.code === '403' ? 'Sair e Trocar Chave' : 'Entendi, tentar novamente'}
+            </button>
+          </div>
+        </div>
+     );
   }
 
   // Quota Exceeded Full Screen Timer
@@ -904,8 +1019,7 @@ function App() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 container mx-auto px-4 md:px-6 overflow-y-auto flex flex-col justify-center relative pb-20 scrollbar-thin scrollbar-thumb-gray-800">
-        {error && <div className="max-w-xl mx-auto mb-6 bg-red-900/20 border border-red-800 text-red-300 p-4 rounded text-center"><p className="text-sm">{error}</p></div>}
-
+        
         {/* SETUP */}
         {gameState === 'SETUP' && (
           <div className="flex flex-col items-center animate-fade-in py-6 md:py-10">
