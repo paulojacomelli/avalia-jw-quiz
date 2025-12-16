@@ -7,6 +7,7 @@ import { generateQuizContent, generateReplacementQuestion } from './services/gem
 import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
 import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
 import { speakText, stopSpeech } from './utils/tts';
+import { LOADING_MESSAGES } from './constants';
 
 type GameState = 'SETUP' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
 type Theme = 'light' | 'dark';
@@ -60,6 +61,9 @@ function App() {
   // API Quota Cooldown State
   const [cooldownTime, setCooldownTime] = useState(0);
 
+  // Loading Message State
+  const [loadingMessage, setLoadingMessage] = useState("");
+
   // Audio/TTS Refs
   const questionReadRef = useRef(false);
 
@@ -103,10 +107,13 @@ function App() {
     localStorage.setItem('jw-quiz-theme', theme);
   }, [theme]);
 
-  // Loading Sound Effect
+  // Loading Sound Effect & Message Logic
   useEffect(() => {
     if (loading) {
       startLoadingDrone();
+      // Pick a random message
+      const randomMsg = LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)];
+      setLoadingMessage(randomMsg);
     } else {
       stopLoadingDrone();
     }
@@ -179,7 +186,8 @@ function App() {
         }
 
         if (quizConfig?.tts) {
-          speakText(textToRead, quizConfig.tts);
+          // Pass apiKey for Gemini TTS support
+          speakText(textToRead, quizConfig.tts, apiKey || undefined);
         }
       }, 500);
       return () => {
@@ -187,7 +195,7 @@ function App() {
         stopSpeech();
       };
     }
-  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime]);
+  }, [currentQuestionIndex, gameState, quizData, isCurrentQuestionAnswered, isSkipping, ttsEnabled, quizConfig, cooldownTime, apiKey]);
 
   // --- Keyboard Shortcuts (Spacebar & Enter to Next) ---
   useEffect(() => {
@@ -404,7 +412,8 @@ function App() {
     // TTS Feedback (Only in play mode generally, or if config allows)
     if (!isReviewing && ttsEnabled && quizConfig?.tts.enabled) {
       const feedback = result.score === 0 ? "Resposta incorreta." : (result.score === 1 ? "Resposta correta!" : `Parcialmente correto. ${result.score} pontos.`);
-      speakText(feedback, quizConfig.tts);
+      // Pass apiKey for Gemini TTS support
+      speakText(feedback, quizConfig.tts, apiKey || undefined);
     }
 
     // If in Play Mode, advance state
@@ -599,7 +608,9 @@ function App() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
           <p className="text-xl animate-pulse font-medium tracking-wide">Preparando seu Quiz...</p>
-          <p className="text-sm opacity-50 mt-2">Consultando as Escrituras e publicações...</p>
+          <p className="text-sm opacity-70 mt-4 max-w-md text-center italic px-4">
+             "{loadingMessage}"
+          </p>
        </div>
      )
   }

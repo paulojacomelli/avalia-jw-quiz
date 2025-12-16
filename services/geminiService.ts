@@ -1,5 +1,5 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { QuizConfig, TopicMode, GeneratedQuiz, QuizQuestion, HintType, QuizFormat, EvaluationResult } from "../types";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { QuizConfig, TopicMode, GeneratedQuiz, QuizQuestion, HintType, QuizFormat, EvaluationResult, TTSConfig } from "../types";
 
 // --- ENTROPIA E VARIABILIDADE ---
 // Esta lista precisa estar aqui para o 'getEntropy' funcionar
@@ -343,4 +343,38 @@ export const askAiAboutQuestion = async (apiKey: string, question: QuizQuestion,
   });
 
   return response.text || "Desculpe, não consegui formular uma resposta agora.";
+};
+
+// Generate Speech using Gemini 2.5 Flash TTS
+export const generateSpeech = async (apiKey: string, text: string, config: TTSConfig): Promise<string | null> => {
+  if (!apiKey) return null;
+  
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Map gender to specific voice names available in Gemini 2.5 Flash TTS
+  // 'Kore' is a good female voice, 'Fenrir' is a deep male voice.
+  const voiceName = config.gender === 'male' ? 'Fenrir' : 'Kore';
+
+  try {
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: { parts: [{ text }] },
+        config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName }
+                }
+            }
+        }
+    });
+
+    // Extract base64 audio string
+    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    return audioData || null;
+
+  } catch (error) {
+    console.error("TTS Generation Error:", error);
+    return null;
+  }
 };

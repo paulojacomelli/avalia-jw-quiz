@@ -1,3 +1,4 @@
+
 import { Difficulty, TopicMode, HintType, QuizFormat } from './types';
 
 export const BIBLE_BOOKS = [
@@ -52,4 +53,27 @@ export const HINT_TYPE_OPTIONS = [
     label: "Pergunte ao Chat", 
     icon: "M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
   }
+];
+
+export const LOADING_MESSAGES = [
+  "Lembre-se: O JW Quiz é para diversão. Para estudo sério, acesse jw.org.",
+  "Dúvidas na resposta? Consulte sempre a 'Espada do Espírito' (a Bíblia)!",
+  "Este app não substitui seu Estudo Pessoal. (Mas ajuda a testar a memória!)",
+  "A fonte oficial é o 'Escravo Fiel'. Nós somos apenas o 'Quiz Fiel'.",
+  "Não confie na nossa memória 100%. Confie em Jeová 100%.",
+  "Encontrou um erro? Seja amoroso e nos avise. Ninguém é perfeito!",
+  "Dica: Use este jogo para ter ideias para sua Adoração em Família.",
+  "Aguardando o sinal... Tenha paciência, é um fruto do espírito!",
+  "Carregando... Esperamos que seja mais rápido que achar o livro de Obadias.",
+  "Conectando... Não desanime, 'quem perseverar até o fim será salvo'.",
+  "Procurando o irmão do som para liberar o microfone...",
+  "Estamos quase lá... Continue vigilante!",
+  "Contando as cadeiras da assistência... aguarde.",
+  "Arrumando o carrinho de publicações... só um instante.",
+  "Carregando... (Aproveite para beber uma água, hidratar é importante).",
+  "Afie sua mente e sua espiritualidade. O jogo já vai começar.",
+  "Preparando perguntas... Você leu o texto diário hoje?",
+  "Carregando novos desafios teocráticos...",
+  "Recuperando dados... Tente lembrar o que foi dito na reunião de ontem!",
+  "Dica Pro: Quem se prepara para a Sentinela acerta mais perguntas aqui."
 ];

@@ -47,7 +47,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
     enabled: ttsEnabled,
     autoRead: true,
     gender: 'female',
-    rate: 1.0,
+    rate: 1.5, // IMPROVED: Increased speed to 1.5x by default
     volume: 1.0
   });
 

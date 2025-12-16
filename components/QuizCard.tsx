@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { GoogleGenAI, FunctionDeclaration, Type, Modality, LiveServerMessage } from "@google/genai";
 import { QuizQuestion, TTSConfig, HintType, QuizFormat, EvaluationResult } from '../types';
-import { HINT_TYPE_OPTIONS } from '../constants';
-import { playSound, startLoadingDrone, stopLoadingDrone } from '../utils/audio';
+import { playSound, startLoadingDrone, stopLoadingDrone, getAudioContext, base64ToFloat32Array, float32ToBase64 } from '../utils/audio';
 import { speakText, stopSpeech, isSpeaking } from '../utils/tts';
 import { askAiAboutQuestion, evaluateFreeResponse } from '../services/geminiService';
 
@@ -26,6 +26,8 @@ interface QuizCardProps {
   isVoided?: boolean;
   apiKey?: string | null;
 }
+
+type InputMethod = 'TEXT' | 'LIVE_VOICE';
 
 export const QuizCard: React.FC<QuizCardProps> = ({ 
   question, 
@@ -52,12 +54,24 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   const [internalSelectedOption, setInternalSelectedOption] = useState<number | null>(null);
   const [hasConfirmed, setHasConfirmed] = useState(false);
   
-  // State for Open Ended
+  // State for Open Ended - Input Method Toggle
+  const [inputMethod, setInputMethod] = useState<InputMethod>('TEXT');
+
+  // State for Open Ended - Text/Dictation
   const [textAnswer, setTextAnswer] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null);
   const recognitionRef = useRef<any>(null); // For SpeechRecognition
+
+  // State for Open Ended - Live Voice
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [isLiveConnecting, setIsLiveConnecting] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<'IDLE' | 'CONNECTING' | 'LISTENING' | 'SPEAKING'>('IDLE');
+  const liveSessionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const nextStartTimeRef = useRef<number>(0);
 
   // Hint State
   const [showHintOptions, setShowHintOptions] = useState(false);
@@ -90,20 +104,28 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     setEvaluationResult(null);
     setIsEvaluating(false);
     setIsRecording(false);
+    setInputMethod('TEXT');
+    disconnectLiveSession();
   }, [question.id]);
+
+  // Cleanup Live Session on unmount
+  useEffect(() => {
+    return () => disconnectLiveSession();
+  }, []);
 
   // Loading Sound Effect Link
   useEffect(() => {
-    if (isAskLoading || isEvaluating || isSkipping) {
+    if (isAskLoading || isEvaluating || isSkipping || isLiveConnecting) {
       startLoadingDrone();
     } else {
       stopLoadingDrone();
     }
-  }, [isAskLoading, isEvaluating, isSkipping]);
+  }, [isAskLoading, isEvaluating, isSkipping, isLiveConnecting]);
 
   // Auto-submit on Time Up
   useEffect(() => {
     if (isTimeUp && !hasConfirmed && !showAnswerKey) {
+        disconnectLiveSession();
         handleConfirm();
     }
   }, [isTimeUp, hasConfirmed, showAnswerKey]);
@@ -158,6 +180,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     if (onAnswer) onAnswer({ score: isCorrect ? 1 : 0, isCorrect, selectedIndex: idx });
   };
 
+  // --- TRADITIONAL OPEN ENDED (TEXT/DICTATION) ---
+
   const handleSubmitFreeResponse = async () => {
     if (!textAnswer.trim() || isEvaluating || isSkipping || evaluationResult || !apiKey) return;
     setIsEvaluating(true);
@@ -197,6 +221,195 @@ export const QuizCard: React.FC<QuizCardProps> = ({
     recognition.onerror = () => setIsRecording(false);
     recognitionRef.current = recognition;
     recognition.start();
+  };
+
+  // --- LIVE CONVERSATION LOGIC ---
+
+  const disconnectLiveSession = () => {
+    if (liveSessionRef.current) {
+        // Just let it close or ignore, API doesn't have strict 'close' on session obj yet in some versions,
+        // but we can stop sending audio.
+        liveSessionRef.current = null;
+    }
+    setIsLiveConnected(false);
+    setIsLiveConnecting(false);
+    setLiveStatus('IDLE');
+    
+    // Stop audio sources
+    if (sourcesRef.current) {
+        sourcesRef.current.forEach(source => source.stop());
+        sourcesRef.current.clear();
+    }
+    nextStartTimeRef.current = 0;
+  };
+
+  const startLiveConversation = async () => {
+    if (!apiKey) return;
+    
+    // Stop any TTS
+    stopSpeech();
+    
+    setIsLiveConnecting(true);
+    setLiveStatus('CONNECTING');
+    playSound('click');
+
+    try {
+        const ai = new GoogleGenAI({ apiKey });
+        
+        // Define tool for model to submit result
+        const submitResultTool: FunctionDeclaration = {
+            name: "submit_quiz_result",
+            description: "Chame esta função APENAS quando o usuário der uma resposta definitiva e você a tiver avaliado. Isso encerrará o quiz.",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    score: { type: Type.NUMBER, description: "Nota de 0.0 a 1.0 (ex: 1.0 para correto, 0.0 para errado)" },
+                    feedback: { type: Type.STRING, description: "Feedback curto para o usuário." }
+                },
+                required: ["score", "feedback"]
+            }
+        };
+
+        const ctx = getAudioContext();
+        audioContextRef.current = ctx;
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+        
+        const sessionPromise = ai.live.connect({
+            model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+            config: {
+                responseModalities: [Modality.AUDIO],
+                systemInstruction: `
+                    Você é um apresentador de Quiz Bíblico (JW). 
+                    Pergunta Atual: "${question.question}".
+                    Resposta Esperada: "${question.correctAnswerText}".
+                    Explicação: "${question.explanation}".
+                    
+                    Seu objetivo: Interagir verbalmente com o usuário. 
+                    1. Peça a resposta dele.
+                    2. Se ele acertar ou errar, discuta brevemente.
+                    3. Se ele acertar ou errar definitivamente, CHAME a função 'submit_quiz_result'.
+                    4. Seja simpático, breve e encorajador.
+                `,
+                tools: [{ functionDeclarations: [submitResultTool] }]
+            },
+            callbacks: {
+                onopen: () => {
+                    console.log("Live Session Connected");
+                    setIsLiveConnecting(false);
+                    setIsLiveConnected(true);
+                    setLiveStatus('LISTENING');
+
+                    // Input Audio Processing
+                    const source = ctx.createMediaStreamSource(stream);
+                    const processor = ctx.createScriptProcessor(4096, 1, 1);
+                    
+                    processor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        // Simple downsampling not strictly needed if context is handled, but let's convert float32 to base64 PCM
+                        const base64Data = float32ToBase64(inputData);
+                        
+                        sessionPromise.then(session => {
+                            if (liveSessionRef.current !== session) return; // Stale session check
+                            session.sendRealtimeInput({
+                                mimeType: "audio/pcm;rate=" + ctx.sampleRate, // Send context rate
+                                data: base64Data
+                            });
+                        });
+                    };
+
+                    source.connect(processor);
+                    processor.connect(ctx.destination);
+                },
+                onmessage: (msg: LiveServerMessage) => {
+                    // 1. Handle Tool Calls (Submission)
+                    if (msg.toolCall) {
+                        for (const call of msg.toolCall.functionCalls) {
+                            if (call.name === 'submit_quiz_result') {
+                                const args = call.args as any;
+                                const result: EvaluationResult = {
+                                    score: args.score,
+                                    feedback: args.feedback,
+                                    isCorrect: args.score > 0.6
+                                };
+                                
+                                // Send simplistic response to model to close loop (though we are ending)
+                                sessionPromise.then(session => {
+                                    session.sendToolResponse({
+                                        functionResponses: {
+                                            name: call.name,
+                                            id: call.id,
+                                            response: { result: "ok" }
+                                        }
+                                    });
+                                });
+
+                                // Finalize in App
+                                setEvaluationResult(result);
+                                if (onAnswer) onAnswer({ 
+                                    score: result.score, 
+                                    isCorrect: result.isCorrect, 
+                                    textAnswer: "(Respondido via Conversa ao Vivo)" 
+                                });
+                                disconnectLiveSession();
+                            }
+                        }
+                    }
+
+                    // 2. Handle Audio Output
+                    const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                    if (audioData && audioContextRef.current) {
+                         setLiveStatus('SPEAKING');
+                         const ctx = audioContextRef.current;
+                         const float32 = base64ToFloat32Array(audioData);
+                         
+                         // Create Buffer (Assuming 24kHz return from Gemini usually, but let's map)
+                         const buffer = ctx.createBuffer(1, float32.length, 24000); 
+                         buffer.getChannelData(0).set(float32);
+                         
+                         const source = ctx.createBufferSource();
+                         source.buffer = buffer;
+                         source.connect(ctx.destination);
+                         
+                         // Queueing logic
+                         const currentTime = ctx.currentTime;
+                         if (nextStartTimeRef.current < currentTime) {
+                             nextStartTimeRef.current = currentTime;
+                         }
+                         source.start(nextStartTimeRef.current);
+                         nextStartTimeRef.current += buffer.duration;
+                         
+                         sourcesRef.current.add(source);
+                         source.onended = () => {
+                             sourcesRef.current.delete(source);
+                             if (sourcesRef.current.size === 0) {
+                                 setLiveStatus('LISTENING');
+                             }
+                         };
+                    }
+                },
+                onclose: () => {
+                    console.log("Live Session Closed");
+                    setIsLiveConnected(false);
+                    setLiveStatus('IDLE');
+                },
+                onerror: (err) => {
+                    console.error("Live Session Error", err);
+                    alert("Erro na conexão ao vivo. Tente novamente.");
+                    disconnectLiveSession();
+                }
+            }
+        });
+        
+        // Store session reference to control flow
+        sessionPromise.then(s => {
+            liveSessionRef.current = s;
+        });
+
+    } catch (e) {
+        console.error(e);
+        setIsLiveConnecting(false);
+        setLiveStatus('IDLE');
+    }
   };
 
   // --- Hint Handling ---
@@ -260,7 +473,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
       } else {
         textToRead += " Digite ou fale sua resposta.";
       }
-      speakText(textToRead, ttsConfig);
+      // Pass apiKey for Gemini TTS support
+      speakText(textToRead, ttsConfig, apiKey || undefined);
     }
   };
 
@@ -340,8 +554,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
              title="Ler em voz alta"
            >
              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-               <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-             </svg>
+               <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
            </button>
         )}
       </div>
@@ -387,39 +600,104 @@ export const QuizCard: React.FC<QuizCardProps> = ({
           <div className="space-y-4 animate-fade-in">
              {!evaluationResult && !showAnswerKey ? (
                <>
-                 <div className="relative">
-                   <textarea 
-                     value={textAnswer}
-                     onChange={(e) => setTextAnswer(e.target.value)}
-                     placeholder="Digite sua resposta aqui..."
-                     className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
-                     disabled={isEvaluating || isTimeUp || isSkipping}
-                   />
-                   <button 
-                     onClick={toggleRecording}
-                     className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
-                     title="Falar resposta"
-                     disabled={isEvaluating || isTimeUp || isSkipping}
-                   >
-                     <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                     </svg>
-                   </button>
-                 </div>
-                 <div className="flex justify-end">
+                 {/* Input Method Toggles */}
+                 <div className="flex gap-4 mb-4 border-b border-gray-700/50 pb-2">
                     <button 
-                       onClick={handleSubmitFreeResponse}
-                       disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
-                       className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      onClick={() => { setInputMethod('TEXT'); disconnectLiveSession(); }}
+                      className={`text-sm font-bold pb-2 border-b-2 transition-colors ${inputMethod === 'TEXT' ? 'border-jw-blue text-jw-blue' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
                     >
-                       {isEvaluating ? (
-                         <>
-                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                           Avaliando...
-                         </>
-                       ) : 'Confirmar e Enviar'}
+                        Texto / Ditado
+                    </button>
+                    <button 
+                      onClick={() => setInputMethod('LIVE_VOICE')}
+                      className={`text-sm font-bold pb-2 border-b-2 transition-colors ${inputMethod === 'LIVE_VOICE' ? 'border-purple-500 text-purple-400' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
+                    >
+                        Conversa ao Vivo
                     </button>
                  </div>
+
+                 {inputMethod === 'TEXT' ? (
+                   <div className="relative animate-fade-in">
+                     <textarea 
+                       value={textAnswer}
+                       onChange={(e) => setTextAnswer(e.target.value)}
+                       placeholder="Digite sua resposta aqui..."
+                       className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
+                       disabled={isEvaluating || isTimeUp || isSkipping}
+                     />
+                     <button 
+                       onClick={toggleRecording}
+                       className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
+                       title="Falar resposta"
+                       disabled={isEvaluating || isTimeUp || isSkipping}
+                     >
+                       <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                       </svg>
+                     </button>
+                   </div>
+                 ) : (
+                    <div className="relative animate-fade-in h-40 bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-purple-500/30 rounded-lg flex flex-col items-center justify-center p-6 text-center">
+                        {!isLiveConnected ? (
+                             <button 
+                                onClick={startLiveConversation}
+                                disabled={isLiveConnecting}
+                                className="group relative flex items-center justify-center w-16 h-16 rounded-full bg-purple-600 hover:bg-purple-500 text-white shadow-lg transition-all transform hover:scale-105"
+                             >
+                                {isLiveConnecting ? (
+                                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                                    </svg>
+                                )}
+                                <span className="absolute top-full mt-3 text-sm font-bold text-purple-300 w-32 whitespace-nowrap">
+                                    {isLiveConnecting ? "Conectando..." : "Iniciar Conversa"}
+                                </span>
+                             </button>
+                        ) : (
+                            <div className="flex flex-col items-center">
+                                <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-all duration-300 ${liveStatus === 'SPEAKING' ? 'bg-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.6)] scale-110' : 'bg-purple-600 shadow-[0_0_20px_rgba(147,51,234,0.4)] animate-pulse'}`}>
+                                    {liveStatus === 'SPEAKING' ? (
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-white animate-bounce">
+                                           <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+                                        </svg>
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-white">
+                                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                                        </svg>
+                                    )}
+                                </div>
+                                <p className="text-sm font-mono text-purple-200 animate-pulse">
+                                    {liveStatus === 'SPEAKING' ? "IA Falando..." : "Ouvindo você..."}
+                                </p>
+                                <button 
+                                    onClick={disconnectLiveSession} 
+                                    className="mt-4 text-xs text-red-400 hover:text-red-300 underline"
+                                >
+                                    Encerrar Conexão
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                 )}
+
+                 {inputMethod === 'TEXT' && (
+                    <div className="flex justify-end mt-4">
+                        <button 
+                        onClick={handleSubmitFreeResponse}
+                        disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
+                        className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                        {isEvaluating ? (
+                            <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Avaliando...
+                            </>
+                        ) : 'Confirmar e Enviar'}
+                        </button>
+                    </div>
+                 )}
                </>
              ) : (
                <div className="bg-jw-card p-4 md:p-6 rounded-lg border border-gray-700">
@@ -483,7 +761,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                     onClick={handleMainHelpClick}
                     onMouseEnter={() => !isSkipping && playSound('hover')}
                     disabled={(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isEvaluating}
-                    className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
+                    className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-gray-700 hover:border-jw-blue transition-colors ${(hintsRemaining === 0 && !activeHint && !showAskAi) || isSkipping || isLiveConnected ? 'opacity-40 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
                     {activeHint ? 'Esconder Dica' : (showAskAi ? 'Fechar Chat' : 'Ajuda')}
@@ -510,8 +788,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                <button
                  onClick={onSkip}
                  onMouseEnter={() => !isSkipping && playSound('hover')}
-                 disabled={isSkipping || isEvaluating}
-                 className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-red-900/50 hover:border-red-500 text-red-300 transition-colors ${isSkipping ? 'opacity-50 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
+                 disabled={isSkipping || isEvaluating || isLiveConnected}
+                 className={`flex items-center text-sm py-2 px-4 rounded-full bg-jw-card border border-red-900/50 hover:border-red-500 text-red-300 transition-colors ${isSkipping || isLiveConnected ? 'opacity-50 cursor-not-allowed' : 'opacity-80 hover:opacity-100 shadow-sm'}`}
                >
                  {isSkipping ? (
                     <>
@@ -551,7 +829,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
         </div>
       )}
 
-      {/* Chat Interface */}
+      {/* Chat Interface (Standard Ask AI) */}
       {showAskAi && (
         <div className="w-full mt-4 bg-jw-hover/50 p-4 rounded-lg border border-gray-700/50 animate-fade-in relative pl-0 md:pl-8 z-10">
             <button 
