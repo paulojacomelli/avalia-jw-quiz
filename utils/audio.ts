@@ -369,39 +369,79 @@ export const playSound = (type: 'click' | 'correct' | 'wrong' | 'next' | 'timeUp
         break;
 
       case 'correct':
-        // Ascending major arpeggio (Success sound)
+        // Victory Sound: Bright Major Chord Arpeggio (C-E-G-C)
         {
-            const notes = [523.25, 659.25, 783.99]; // C, E, G
+            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+            
             notes.forEach((freq, i) => {
                 const osc = context.createOscillator();
                 const gain = context.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(freq, now + (i * 0.08));
+                
+                // Mix Sine and Triangle for body and chime
+                osc.type = i % 2 === 0 ? 'sine' : 'triangle'; 
+                osc.frequency.setValueAtTime(freq, now + (i * 0.05));
+                
                 osc.connect(gain);
                 gain.connect(context.destination);
-                gain.gain.setValueAtTime(0, now + (i * 0.08));
-                gain.gain.linearRampToValueAtTime(0.1, now + (i * 0.08) + 0.02);
-                gain.gain.exponentialRampToValueAtTime(0.001, now + (i * 0.08) + 0.4);
-                osc.start(now + (i * 0.08));
-                osc.stop(now + (i * 0.08) + 0.4);
+                
+                // Envelope
+                gain.gain.setValueAtTime(0, now + (i * 0.05));
+                // Quick Attack
+                gain.gain.linearRampToValueAtTime(0.1, now + (i * 0.05) + 0.05); 
+                // Long Decay
+                gain.gain.exponentialRampToValueAtTime(0.001, now + (i * 0.05) + 0.8);
+                
+                osc.start(now + (i * 0.05));
+                osc.stop(now + (i * 0.05) + 0.9);
             });
         }
         break;
 
       case 'wrong':
-        // Soft low thud (Not a harsh buzzer)
+        // Failure Sound: Descending "Womp Womp" Style
         {
-            const osc = context.createOscillator();
-            const gain = context.createGain();
-            osc.connect(gain);
-            gain.connect(context.destination);
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(150, now);
-            osc.frequency.linearRampToValueAtTime(100, now + 0.2);
-            gain.gain.setValueAtTime(0.1, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-            osc.start(now);
-            osc.stop(now + 0.3);
+            // First tone (higher drop)
+            const osc1 = context.createOscillator();
+            const gain1 = context.createGain();
+            osc1.type = 'sawtooth';
+            // Low pass filter to remove harshness
+            const filter1 = context.createBiquadFilter();
+            filter1.type = 'lowpass';
+            filter1.frequency.value = 800;
+            
+            osc1.frequency.setValueAtTime(400, now);
+            osc1.frequency.linearRampToValueAtTime(200, now + 0.2);
+            
+            osc1.connect(filter1);
+            filter1.connect(gain1);
+            gain1.connect(context.destination);
+            
+            gain1.gain.setValueAtTime(0.1, now);
+            gain1.gain.linearRampToValueAtTime(0, now + 0.2);
+            
+            osc1.start(now);
+            osc1.stop(now + 0.25);
+
+            // Second tone (lower drop, longer)
+            const osc2 = context.createOscillator();
+            const gain2 = context.createGain();
+            osc2.type = 'sawtooth';
+            const filter2 = context.createBiquadFilter();
+            filter2.type = 'lowpass';
+            filter2.frequency.value = 800;
+
+            osc2.frequency.setValueAtTime(350, now + 0.25);
+            osc2.frequency.linearRampToValueAtTime(100, now + 0.6);
+            
+            osc2.connect(filter2);
+            filter2.connect(gain2);
+            gain2.connect(context.destination);
+            
+            gain2.gain.setValueAtTime(0.1, now + 0.25);
+            gain2.gain.linearRampToValueAtTime(0, now + 0.6);
+            
+            osc2.start(now + 0.25);
+            osc2.stop(now + 0.65);
         }
         break;
 
