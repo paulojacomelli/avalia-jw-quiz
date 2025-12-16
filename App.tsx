@@ -1004,19 +1004,21 @@ function App() {
                     </svg>
                  )}
                </button>
-            </div>
 
-            {/* New Quiz Button (Condensed) */}
-            {isQuizActive && (
-               <button 
-                onClick={handleReset} 
-                onMouseEnter={() => playSound('hover')} 
-                className="ml-2 bg-black/10 hover:bg-black/20 p-2 rounded-lg transition-colors"
-                title="Novo Quiz"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
-               </button>
-            )}
+               {/* Restart / Home Button */}
+               {isQuizActive && (
+                 <button 
+                   onClick={handleReset} 
+                   onMouseEnter={() => playSound('hover')} 
+                   className="p-2 rounded-full hover:bg-black/10 transition-colors text-white"
+                   title="Voltar ao Início"
+                 >
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                   </svg>
+                 </button>
+               )}
+            </div>
           </div>
         </div>
       </header>
@@ -1206,8 +1208,9 @@ function App() {
       )}
 
       {/* Footer / Change Key */}
-      <footer className="shrink-0 py-2 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity">
+      <footer className="shrink-0 py-4 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity flex flex-col gap-1">
         <button onClick={logout} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
+        <span>Versão: 1.0.1</span>
       </footer>
     </div>
   );
