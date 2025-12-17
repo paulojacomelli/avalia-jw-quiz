@@ -17,6 +17,7 @@ interface QuizCardProps {
   hintsRemaining?: number; 
   onRevealHint?: () => void;
   activeTeamName?: string;
+  activeTeamColor?: string; // New Prop for team color
   ttsConfig?: TTSConfig;
   allowAskAi?: boolean;
   allowStandardHint?: boolean;
@@ -39,6 +40,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
   hintsRemaining = -1,
   onRevealHint,
   activeTeamName,
+  activeTeamColor,
   ttsConfig,
   allowAskAi = false,
   allowStandardHint = true,
@@ -308,7 +310,10 @@ export const QuizCard: React.FC<QuizCardProps> = ({
 
       {/* Team Banner */}
       {activeTeamName && !showAnswerKey && (
-        <div className="mb-4 inline-block self-start bg-jw-blue text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider animate-fade-in shadow-sm">
+        <div 
+          className="mb-4 inline-block self-start text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider animate-fade-in shadow-sm"
+          style={{ backgroundColor: activeTeamColor || 'var(--accent-primary)' }}
+        >
           Vez de: {activeTeamName}
         </div>
       )}
@@ -359,7 +364,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({
                     (internalSelectedOption === idx || (showAnswerKey && idx === question.correctAnswerIndex))
                       ? 'bg-white text-jw-blue' 
                       : 'bg-gray-700/50 group-hover:bg-jw-text group-hover:text-jw-dark'
-                  }`}>
+                  }`}
+                  style={
+                    (internalSelectedOption === idx) ? { color: activeTeamColor || 'var(--accent-primary)' } : {}
+                  }
+                  >
                     {String.fromCharCode(65 + idx)}
                   </span>
                   <span>{option}</span>

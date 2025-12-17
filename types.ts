@@ -39,6 +39,7 @@ export interface QuizQuestion {
 export interface Team {
   id: string;
   name: string;
+  color: string; // Hex code for team UI elements
   score: number;
   correctCount: number;
   wrongCount: number;

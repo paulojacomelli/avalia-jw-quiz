@@ -12,6 +12,10 @@ import { LOADING_MESSAGES } from './constants';
 type GameState = 'SETUP' | 'READY_CHECK' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
 type Theme = 'light' | 'dark';
 
+// Palette for Teams: Blue, Red, Green, Amber
+const TEAM_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
+const DEFAULT_COLOR = '#5b3c88'; // JW Purple
+
 // Structured Error Interface
 interface ApiErrorDetail {
   title: string;
@@ -46,6 +50,10 @@ function App() {
     rate: 1.5, // Requested speed
     volume: 1.0
   });
+  
+  // TTS Menu State
+  const [isTTSMenuOpen, setIsTTSMenuOpen] = useState(false);
+  const ttsMenuRef = useRef<HTMLDivElement>(null);
 
   // Game State
   const [gameState, setGameState] = useState<GameState>('SETUP');
@@ -115,9 +123,18 @@ function App() {
       setIsFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    
+    // Click outside listener for TTS Menu
+    const handleClickOutside = (event: MouseEvent) => {
+      if (ttsMenuRef.current && !ttsMenuRef.current.contains(event.target as Node)) {
+        setIsTTSMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
 
@@ -276,20 +293,21 @@ function App() {
     setGlobalSoundState(newState);
     localStorage.setItem('jw-quiz-sound', String(newState));
   };
-
-  const handleTTSToggle = () => {
-    const newState = !ttsEnabled;
-    setTtsEnabled(newState);
-    localStorage.setItem('jw-quiz-tts', String(newState));
-    updateTTSConfigState(ttsConfig.engine, newState);
-    if (!newState) stopSpeech();
-  };
   
-  const handleTTSEngineChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const newEngine = e.target.value as 'browser' | 'gemini';
-      updateTTSConfigState(newEngine, ttsEnabled);
-      // Play a small sample or click sound
+  const handleTTSSelection = (selection: 'browser' | 'gemini' | 'off') => {
       playSound('click');
+      if (selection === 'off') {
+          setTtsEnabled(false);
+          localStorage.setItem('jw-quiz-tts', 'false');
+          stopSpeech();
+      } else {
+          setTtsEnabled(true);
+          // Removed undefined setTtsEngine call.
+          // State is managed via ttsConfig and ttsEnabled.
+          localStorage.setItem('jw-quiz-tts', 'true');
+          updateTTSConfigState(selection, true);
+      }
+      setIsTTSMenuOpen(false);
   };
 
   const toggleFullscreen = () => {
@@ -379,7 +397,15 @@ function App() {
   };
 
   const handleGenerate = async (config: QuizConfig) => {
+    // 1. Trigger loading UI immediately
+    setLoading(true);
+    setLoadingMessage("Gerando perguntas..."); // Initial message
+    setErrorDetail(null);
+    setQuizData(null);
+
+    // Ensure we have a key (defensive check)
     if (!apiKey) {
+      setLoading(false);
       setErrorDetail({
         code: 'NO_KEY',
         title: 'Chave Ausente',
@@ -389,20 +415,19 @@ function App() {
       return;
     }
 
-    // Attempt to resume audio context on user gesture
-    resumeAudioContext();
+    // Attempt to resume audio context safely
+    try {
+        resumeAudioContext();
+    } catch (e) {
+        console.warn("Could not resume audio context", e);
+    }
 
     // INJECT THE GLOBAL TTS CONFIG INTO THE QUIZ CONFIG
-    // This overrides whatever dummy tts config might have come from the form
     const finalConfig = {
       ...config,
       tts: ttsConfig
     };
 
-    setLoading(true);
-    setLoadingMessage("Gerando perguntas..."); // Initial message
-    setErrorDetail(null);
-    setQuizData(null);
     setQuizConfig(finalConfig);
     setTimeLimit(finalConfig.timeLimit);
     setHintsRemaining(finalConfig.maxHints);
@@ -413,6 +438,7 @@ function App() {
       tempTeams = finalConfig.teams.map((name, idx) => ({
         id: `team-${idx}`,
         name,
+        color: TEAM_COLORS[idx % TEAM_COLORS.length], // Assign color from palette
         score: 0,
         correctCount: 0,
         wrongCount: 0,
@@ -422,6 +448,7 @@ function App() {
       tempTeams = [{
         id: 'solo',
         name: 'Você',
+        color: DEFAULT_COLOR,
         score: 0,
         correctCount: 0,
         wrongCount: 0,
@@ -442,7 +469,6 @@ function App() {
       }
 
       setQuizData(data);
-      // Change: Move to READY_CHECK instead of starting directly
       setGameState('READY_CHECK');
     } catch (err: any) {
       handleApiError(err);
@@ -738,6 +764,8 @@ function App() {
     setIsSkipping(false);
     setCooldownTime(0);
     setVoidedIndices(new Set());
+    // Stop loading just in case
+    setLoading(false);
   };
 
   const getTimerStyles = () => {
@@ -747,152 +775,30 @@ function App() {
     if (percentage > 20) return 'bg-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.4)] animate-pulse';
     return 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-bounce';
   };
+  
+  // Get text for current TTS status
+  const getTTSStatusText = () => {
+      if (!ttsEnabled) return "Sem Narração";
+      if (ttsConfig.engine === 'browser') return "Voz Clássica";
+      return "Voz Natural";
+  };
+  
+  const getTTSStatusIcon = () => {
+      if (!ttsEnabled) return (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 opacity-70">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          </svg>
+      );
+      return (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+          </svg>
+      );
+  };
 
-  // --- RENDERING ---
-
+  // If not authenticated, show login screen
   if (!isAuthenticated) {
     return <LoginScreen />;
-  }
-
-  if (loading) {
-     return (
-       <div className="h-screen flex flex-col items-center justify-center bg-jw-dark text-jw-text transition-colors duration-300">
-          <svg className="animate-spin h-16 w-16 text-jw-blue mb-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-xl animate-pulse font-medium tracking-wide">Preparando seu Quiz...</p>
-          <p className="text-sm opacity-70 mt-4 max-w-md text-center italic px-4">
-             "{loadingMessage}"
-          </p>
-       </div>
-     )
-  }
-
-  // General Error Modal (Replaces simple error div)
-  if (errorDetail && cooldownTime === 0) {
-     return (
-        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in p-4">
-          <div className="bg-jw-card border border-red-500/30 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-red-500"></div>
-            
-            <div className="w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-red-400">
-                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-               </svg>
-            </div>
-  
-            <h2 className="text-xl font-bold mb-2 text-white">{errorDetail.title}</h2>
-            <div className="bg-red-500/10 rounded-lg p-3 mb-4 text-xs font-mono text-red-300 border border-red-500/20 text-left overflow-x-auto whitespace-pre-wrap">
-               Erro: {errorDetail.code}
-            </div>
-            <p className="text-gray-300 mb-6 text-sm leading-relaxed">
-              {errorDetail.message}
-            </p>
-
-            <div className="bg-jw-hover rounded-lg p-4 mb-8 text-left border-l-4 border-jw-blue">
-               <strong className="block text-xs uppercase text-jw-blue mb-1">O que fazer?</strong>
-               <p className="text-sm text-gray-400">{errorDetail.solution}</p>
-            </div>
-  
-            <button 
-              onClick={() => {
-                  setErrorDetail(null);
-                  if (errorDetail.code === '403') logout(); // If key error, logout
-              }} 
-              className="w-full bg-jw-blue hover:bg-opacity-90 text-white font-bold py-3 px-6 rounded-lg transition-colors"
-            >
-              {errorDetail.code === '403' ? 'Sair e Trocar Chave' : 'Entendi, tentar novamente'}
-            </button>
-          </div>
-        </div>
-     );
-  }
-
-  // Quota Exceeded Full Screen Timer
-  if (cooldownTime > 0) {
-    return (
-      <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in">
-        <div className="bg-jw-card border border-red-500/30 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-red-500"></div>
-          
-          <div className="w-20 h-20 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 text-red-400">
-               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-             </svg>
-          </div>
-
-          <h2 className="text-2xl font-bold mb-2 text-white">Limite de Uso da IA Atingido</h2>
-          <p className="text-gray-400 mb-8 text-sm">
-            Muitas requisições foram feitas em pouco tempo. O sistema precisa de uma pausa para restabelecer a conexão.
-          </p>
-
-          <div className="text-6xl font-mono font-bold text-jw-blue mb-8 tabular-nums">
-             {cooldownTime}s
-          </div>
-
-          <button 
-            onClick={() => setCooldownTime(0)} 
-            className="text-sm text-gray-500 hover:text-white underline transition-colors"
-          >
-            Cancelar e Voltar ao Início
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // READY CHECK SCREEN (New)
-  if (gameState === 'READY_CHECK') {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-jw-dark text-jw-text transition-colors duration-300 z-50 animate-fade-in px-4">
-         <div className="bg-jw-card p-8 md:p-12 rounded-3xl shadow-2xl text-center border border-gray-700 max-w-lg w-full">
-            <div className="w-20 h-20 bg-jw-blue/20 rounded-full flex items-center justify-center mx-auto mb-6 text-jw-blue">
-               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10">
-                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-               </svg>
-            </div>
-            
-            <h2 className="text-2xl md:text-3xl font-bold mb-6 text-jw-text">Tudo pronto?</h2>
-            
-            <div className="mb-8">
-               <span className="block text-xs md:text-sm font-bold uppercase tracking-widest opacity-50 mb-2">Tema</span>
-               <p className="text-xl md:text-2xl font-medium leading-relaxed">
-                 {quizData?.title || "Seu quiz foi gerado com sucesso."}
-               </p>
-            </div>
-            
-            {ttsEnabled && ttsConfig.engine === 'gemini' && (
-               <div className="bg-jw-hover/50 p-3 rounded-lg text-sm mb-8 flex items-center justify-center gap-2 text-green-500/80">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
-                  Áudio IA pré-carregado
-               </div>
-            )}
-
-            <button 
-              onClick={handleConfirmStart}
-              className="w-full bg-jw-blue text-white font-bold py-4 px-8 rounded-xl shadow-lg hover:bg-opacity-90 transition-transform active:scale-95 text-lg flex items-center justify-center gap-2"
-            >
-              Estou Pronto
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
-            </button>
-         </div>
-      </div>
-    );
-  }
-
-  if (gameState === 'COUNTDOWN') {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-jw-blue text-white transition-colors duration-300 z-50">
-         <h2 className="text-2xl md:text-4xl font-light mb-4 opacity-80 uppercase tracking-widest">Sua vez</h2>
-         <div className="text-4xl md:text-6xl font-bold mb-12 animate-fade-in-up bg-black/10 px-8 py-4 rounded-xl shadow-lg border border-black/10">
-           {teams[currentTeamIndex]?.name || "Você"}
-         </div>
-         <div className="text-[8rem] md:text-[12rem] font-bold font-mono leading-none animate-pulse drop-shadow-2xl">
-           {countdownValue}
-         </div>
-      </div>
-    )
   }
 
   // Calculate if quiz is active to show in header or logic
@@ -903,122 +809,193 @@ function App() {
       className="h-screen flex flex-col font-sans bg-jw-dark text-jw-text overflow-hidden transition-colors duration-300" 
       style={{ zoom: zoomLevel }}
     >
-      
+      {/* LOADING SCREEN OVERLAY */}
+      {loading && (
+        <div className="fixed inset-0 z-[60] bg-[#121212] flex flex-col items-center justify-center animate-fade-in text-center px-4 cursor-wait">
+            <div className="relative mb-8">
+               {/* Background ring */}
+               <div className="w-16 h-16 md:w-20 md:h-20 border-[6px] border-gray-800 rounded-full"></div>
+               {/* Spinning indicator */}
+               <div className="w-16 h-16 md:w-20 md:h-20 border-[6px] border-t-jw-blue border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+            </div>
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-300 mb-6 tracking-wide">Preparando seu Quiz...</h2>
+            <p className="text-gray-400 text-sm md:text-base max-w-lg italic font-serif opacity-80 leading-relaxed animate-pulse">
+               "{loadingMessage}"
+            </p>
+        </div>
+      )}
+
+      {/* ERROR MODAL */}
+      {errorDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-jw-card max-w-md w-full rounded-2xl shadow-2xl border border-red-500/30 overflow-hidden">
+                <div className="bg-red-900/20 p-6 border-b border-red-500/20 flex items-start gap-4">
+                    <div className="p-3 bg-red-500/20 rounded-full shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-red-400">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-red-200">{errorDetail.title}</h3>
+                        <p className="text-red-300/70 text-sm font-mono mt-1">Código: {errorDetail.code}</p>
+                    </div>
+                </div>
+                <div className="p-6 space-y-4">
+                    <p className="text-jw-text opacity-90 leading-relaxed">{errorDetail.message}</p>
+                    <div className="bg-jw-hover p-4 rounded-lg text-sm opacity-80 border border-gray-600/30">
+                        <strong>Sugestão:</strong> {errorDetail.solution}
+                    </div>
+                    <button 
+                        onClick={() => setErrorDetail(null)}
+                        className="w-full py-3 bg-jw-blue hover:bg-opacity-90 text-white font-bold rounded-lg transition-colors shadow-lg"
+                    >
+                        Entendido
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* GLOBAL HEADER WITH SETTINGS */}
-      <header className="bg-jw-blue text-white h-auto py-2 shrink-0 flex flex-col md:flex-row items-center shadow-lg z-20 transition-colors gap-2 md:gap-0">
-        <div className="container mx-auto px-4 flex flex-wrap items-center justify-between gap-y-2">
+      <header className="bg-jw-blue text-white h-16 shrink-0 flex items-center shadow-lg z-20 transition-colors relative">
+        <div className="container mx-auto px-4 flex items-center justify-between">
           
-          {/* Logo / Title */}
-          <div className="flex items-center gap-3 mr-4">
+          {/* Left: Logo */}
+          <div className="flex items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 opacity-80"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
             <h1 className="text-base font-semibold tracking-wide truncate">JW Quiz Creator</h1>
           </div>
 
-          {/* Settings Toolbar */}
-          <div className="flex items-center gap-2 md:gap-4 ml-auto overflow-x-auto">
-            {/* Zoom */}
-            <div className="flex items-center gap-1 bg-black/10 rounded-lg px-1">
-              <button 
-                onClick={() => setZoomLevel(z => Math.max(0.7, z - 0.1))} 
-                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-black/10 rounded"
-                title="Diminuir"
-              >
-                -
-              </button>
-              <span className="text-xs font-mono w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
-              <button 
-                onClick={() => setZoomLevel(z => Math.min(1.5, z + 0.1))} 
-                className="w-8 h-8 flex items-center justify-center font-bold hover:bg-black/10 rounded"
-                title="Aumentar"
-              >
-                +
-              </button>
-            </div>
+          {/* Right: Controls */}
+          <div className="flex items-center gap-2 md:gap-4">
+            
+            {/* 1. Theme Toggle */}
+            <button 
+               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+               className="p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100"
+               title="Tema Escuro/Claro"
+             >
+               {theme === 'dark' ? (
+                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>
+               ) : (
+                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
+               )}
+            </button>
 
-            {/* Divider */}
-            <div className="w-px h-6 bg-black/20 mx-1"></div>
+            {/* 2. Sound Toggle */}
+            <button 
+               onClick={handleSoundToggle}
+               className={`p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100 ${!soundEnabled && 'opacity-60'}`}
+               title="Efeitos Sonoros"
+             >
+               {soundEnabled ? (
+                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+               ) : (
+                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
+               )}
+            </button>
 
-            {/* Toggle Group */}
-            <div className="flex items-center gap-2">
-               {/* Theme */}
+            {/* 3. TTS Selection Menu */}
+            <div className="relative" ref={ttsMenuRef}>
                <button 
-                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                 className="p-2 rounded-full hover:bg-black/10 transition-colors"
-                 title="Tema Escuro/Claro"
+                  onClick={() => setIsTTSMenuOpen(!isTTSMenuOpen)}
+                  className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors px-3 py-1.5 rounded-lg border border-white/10"
                >
-                 {theme === 'dark' ? (
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>
-                 ) : (
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
-                 )}
+                  {getTTSStatusIcon()}
+                  <span className="text-sm font-semibold hidden md:inline">{getTTSStatusText()}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-3 h-3 ml-1 transition-transform duration-200 ${isTTSMenuOpen ? 'rotate-180' : ''}`}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
                </button>
 
-               {/* Sound */}
-               <button 
-                 onClick={handleSoundToggle}
-                 className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!soundEnabled && 'opacity-50'}`}
-                 title="Efeitos Sonoros"
-               >
-                 {soundEnabled ? (
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
-                 ) : (
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>
-                 )}
-               </button>
+               {/* Dropdown Menu */}
+               {isTTSMenuOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 animate-fade-in origin-top-right">
+                     
+                     <button 
+                       onClick={() => handleTTSSelection('browser')}
+                       className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-800 flex items-center justify-between"
+                     >
+                        <span>Voz Clássica</span>
+                        {ttsEnabled && ttsConfig.engine === 'browser' && <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                     </button>
+                     
+                     <button 
+                       onClick={() => handleTTSSelection('gemini')}
+                       className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-800 flex items-center justify-between"
+                     >
+                        <span>Voz Natural</span>
+                        {ttsEnabled && ttsConfig.engine === 'gemini' && <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                     </button>
 
-               {/* TTS Global Control */}
-               <div className={`flex items-center gap-1 bg-black/10 rounded-lg pr-2 transition-all ${!ttsEnabled ? 'opacity-70' : ''}`}>
-                 <button 
-                   onClick={handleTTSToggle}
-                   className={`p-2 rounded-full hover:bg-black/10 transition-colors ${!ttsEnabled && 'opacity-50'}`}
-                   title="Narração (TTS)"
-                 >
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
-                 </button>
-                 
-                 {ttsEnabled && (
-                    <select 
-                      value={ttsConfig.engine}
-                      onChange={handleTTSEngineChange}
-                      className="bg-transparent text-xs font-bold border-none outline-none text-white cursor-pointer py-1"
-                    >
-                      <option value="browser" className="text-black">Voz Clássica</option>
-                      <option value="gemini" className="text-black">Voz Natural</option>
-                    </select>
-                 )}
-               </div>
+                     <div className="h-px bg-gray-700 my-1"></div>
 
-               {/* Fullscreen Toggle */}
-               <button
-                 onClick={toggleFullscreen}
-                 className="p-2 rounded-full hover:bg-black/10 transition-colors"
-                 title={isFullscreen ? "Sair da Tela Cheia" : "Tela Cheia"}
-               >
-                 {isFullscreen ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                    </svg>
-                 ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-                    </svg>
-                 )}
-               </button>
+                     <button 
+                       onClick={() => handleTTSSelection('off')}
+                       className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 flex items-center justify-between"
+                     >
+                        <span className="font-medium">Desativar</span>
+                        {!ttsEnabled && <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                     </button>
 
-               {/* Restart / Home Button */}
-               {isQuizActive && (
-                 <button 
-                   onClick={handleReset} 
-                   onMouseEnter={() => playSound('hover')} 
-                   className="p-2 rounded-full hover:bg-black/10 transition-colors text-white"
-                   title="Voltar ao Início"
-                 >
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                   </svg>
-                 </button>
+                  </div>
                )}
             </div>
+
+            {/* 3.5 Zoom Controls */}
+             <div className="flex items-center gap-1 bg-white/10 rounded-lg p-1 border border-white/10 mr-1">
+               <button 
+                 onClick={() => setZoomLevel(prev => Math.max(0.75, prev - 0.05))}
+                 className="p-1 hover:bg-white/20 rounded transition-colors text-white/90"
+                 title="Diminuir (Zoom Out)"
+               >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+               </button>
+               <span className="text-[10px] font-mono opacity-60 min-w-[3ch] text-center hidden md:inline-block">
+                 {Math.round(zoomLevel * 100)}%
+               </span>
+               <button 
+                 onClick={() => setZoomLevel(prev => Math.min(1.5, prev + 0.05))}
+                 className="p-1 hover:bg-white/20 rounded transition-colors text-white/90"
+                 title="Aumentar (Zoom In)"
+               >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+                  </svg>
+               </button>
+             </div>
+
+            {/* 4. Fullscreen Toggle */}
+            <button
+               onClick={toggleFullscreen}
+               className="p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100"
+               title={isFullscreen ? "Sair da Tela Cheia" : "Tela Cheia"}
+            >
+               {isFullscreen ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                  </svg>
+               ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                  </svg>
+               )}
+            </button>
+
+            {/* 5. Restart / Home Button (ALWAYS VISIBLE) */}
+             <button 
+               onClick={handleReset} 
+               onMouseEnter={() => playSound('hover')} 
+               className="p-2 rounded-full hover:bg-black/10 transition-colors text-white opacity-90 hover:opacity-100"
+               title="Voltar ao Início"
+             >
+               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                 <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+               </svg>
+             </button>
+            
           </div>
         </div>
       </header>
@@ -1029,7 +1006,15 @@ function App() {
           <span className="opacity-70 font-mono whitespace-nowrap mr-4">Rodada {currentRound}</span>
           <div className="flex gap-4">
              {teams.map((t, idx) => (
-               <div key={t.id} className={`flex items-center gap-2 px-3 py-1 rounded-full transition-all whitespace-nowrap ${idx === currentTeamIndex ? 'bg-jw-blue text-white font-bold ring-2 ring-offset-2 ring-offset-jw-dark ring-jw-blue' : 'opacity-50'}`}>
+               <div 
+                 key={t.id} 
+                 className={`flex items-center gap-2 px-3 py-1 rounded-full transition-all whitespace-nowrap border-2 ${idx === currentTeamIndex ? 'text-white font-bold ring-2 ring-offset-2 ring-offset-jw-dark' : 'opacity-50 border-transparent bg-transparent'}`}
+                 style={{ 
+                    backgroundColor: idx === currentTeamIndex ? t.color : 'transparent',
+                    borderColor: idx === currentTeamIndex ? t.color : 'transparent',
+                    '--tw-ring-color': t.color
+                 } as React.CSSProperties}
+               >
                  <span>{t.name}</span>
                  <span className="bg-black/20 px-1.5 rounded">{t.score}</span>
                </div>
@@ -1081,6 +1066,62 @@ function App() {
           </div>
         )}
 
+        {/* READY CHECK (CONFIRMATION SCREEN) */}
+        {gameState === 'READY_CHECK' && quizData && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
+                <div className="bg-[#1e1e1e] p-8 rounded-2xl shadow-2xl text-center border border-gray-800 max-w-sm w-full flex flex-col items-center">
+                    
+                    {/* Check Icon */}
+                    <div className="w-12 h-12 rounded-full border-2 border-jw-blue flex items-center justify-center mb-6 text-jw-blue shadow-[0_0_15px_rgba(91,60,136,0.3)]">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                    </div>
+
+                    <h2 className="text-2xl font-bold text-white mb-6">Tudo pronto?</h2>
+
+                    <div className="w-full mb-8">
+                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">TEMA</span>
+                         <h3 className="text-lg font-medium text-gray-200 mt-2 leading-tight">
+                            {quizData.title}
+                         </h3>
+                    </div>
+
+                    <button 
+                        onClick={handleConfirmStart}
+                        className="w-full py-3 bg-jw-blue text-white font-bold rounded-lg shadow-lg hover:bg-opacity-90 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                        Estou Pronto 
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                        </svg>
+                    </button>
+                    
+                </div>
+            </div>
+        )}
+
+        {/* COUNTDOWN */}
+        {gameState === 'COUNTDOWN' && (
+             <div 
+                className="fixed inset-0 z-50 flex flex-col items-center justify-center animate-fade-in transition-colors duration-500"
+                style={{ backgroundColor: teams[currentTeamIndex]?.color || '#5b3c88' }}
+             >
+                <div key={countdownValue} className="text-[12rem] md:text-[16rem] font-black text-white/20 animate-ping absolute scale-150">
+                   {countdownValue > 0 ? countdownValue : "JÁ!"}
+                </div>
+                <div key={`static-${countdownValue}`} className="text-[8rem] md:text-[10rem] font-black text-white relative z-10 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] animate-bounce-short">
+                   {countdownValue > 0 ? countdownValue : "JÁ!"}
+                </div>
+                <div className="mt-8 flex flex-col items-center">
+                    <p className="text-xl opacity-80 uppercase tracking-[0.5em] font-light text-white mb-2">Prepare-se</p>
+                    <div className="text-4xl font-bold text-white bg-black/20 px-6 py-2 rounded-xl">
+                        {teams[currentTeamIndex]?.name}
+                    </div>
+                </div>
+             </div>
+        )}
+
         {/* PLAYING */}
         {gameState === 'PLAYING' && quizData && (
           <div className="w-full animate-fade-in relative h-full flex flex-col">
@@ -1096,6 +1137,7 @@ function App() {
                  hintsRemaining={hintsRemaining}
                  onRevealHint={handleUseHint}
                  activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
+                 activeTeamColor={quizConfig?.isTeamMode ? teams[currentTeamIndex].color : undefined}
                  ttsConfig={ttsConfig}
                  allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
                  allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
@@ -1114,7 +1156,7 @@ function App() {
                 <h2 className="text-2xl md:text-3xl font-bold mb-6 text-jw-blue">Fim da Rodada {currentRound}</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                   {teams.map(t => (
-                    <div key={t.id} className="bg-jw-hover p-4 rounded-lg">
+                    <div key={t.id} className="bg-jw-hover p-4 rounded-lg border-l-4" style={{ borderLeftColor: t.color }}>
                       <h3 className="font-bold text-lg mb-2">{t.name}</h3>
                       <div className="text-4xl font-bold text-jw-text mb-1">{t.score}</div>
                       <div className="text-xs opacity-60">pontos</div>
@@ -1142,9 +1184,13 @@ function App() {
                     <h3 className="opacity-60 uppercase tracking-widest text-sm font-bold mb-4">Placar Final</h3>
                     <div className="flex flex-col md:flex-row gap-6 justify-center">
                       {teams.map((t, i) => (
-                         <div key={t.id} className={`flex-1 p-6 rounded-xl ${i === 0 && teams.length > 1 && teams[0].score > teams[1].score ? 'bg-yellow-500/10 border border-yellow-500/50' : 'bg-jw-hover'}`}>
+                         <div 
+                            key={t.id} 
+                            className={`flex-1 p-6 rounded-xl border-t-4 ${i === 0 && teams.length > 1 && teams[0].score > teams[1].score ? 'bg-yellow-500/10 border-yellow-500' : 'bg-jw-hover'}`}
+                            style={{ borderTopColor: t.color }}
+                         >
                             <h4 className="text-xl font-bold mb-2">{t.name}</h4>
-                            <div className="text-5xl font-bold text-jw-blue mb-2">{t.score} <span className="text-xl text-gray-500">/ {t.correctCount + t.wrongCount}</span></div>
+                            <div className="text-5xl font-bold mb-2" style={{ color: t.color }}>{t.score} <span className="text-xl text-gray-500">/ {t.correctCount + t.wrongCount}</span></div>
                             <div className="space-y-1 text-sm opacity-70">
                                <p>Acertos: {t.correctCount}</p>
                                <p>Erros: {t.wrongCount}</p>
