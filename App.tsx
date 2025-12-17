@@ -7,10 +7,11 @@ import { generateQuizContent, generateReplacementQuestion, preGenerateQuizAudio 
 import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
 import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
 import { speakText, stopSpeech, getQuestionReadAloudText } from './utils/tts';
-import { LOADING_MESSAGES } from './constants';
+import { LOADING_MESSAGES, TUTORIAL_CONFIG, TUTORIAL_DATA } from './constants';
+import { TourOverlay, TourStep } from './components/TourOverlay';
 
 type GameState = 'SETUP' | 'READY_CHECK' | 'COUNTDOWN' | 'PLAYING' | 'ROUND_SUMMARY' | 'FINISHED';
-type Theme = 'light' | 'dark';
+type Theme = 'light' | 'dark' | 'system';
 
 // Palette for Teams: Blue, Red, Green, Amber
 const TEAM_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
@@ -34,8 +35,8 @@ function App() {
   // Replaced generic string error with structured object
   const [errorDetail, setErrorDetail] = useState<ApiErrorDetail | null>(null);
   
-  // App Preferences (Global State)
-  const [theme, setTheme] = useState<Theme>('dark');
+  // App Preferences (Global State) - Default to System
+  const [theme, setTheme] = useState<Theme>('system');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(1.0); 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -63,6 +64,15 @@ function App() {
   const [userAnswers, setUserAnswers] = useState<(number | string | null)[]>([]);
   const [isCurrentQuestionAnswered, setIsCurrentQuestionAnswered] = useState(false);
   
+  // Tutorial State
+  const [isTutorialMode, setIsTutorialMode] = useState(false);
+
+  // Setup Form State (Lifted Up for Guide Control)
+  const [setupStep, setSetupStep] = useState(1);
+
+  // Guide Tour State
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+
   // Skip State
   const [isSkipping, setIsSkipping] = useState(false);
   
@@ -92,8 +102,121 @@ function App() {
   // Loading Message State
   const [loadingMessage, setLoadingMessage] = useState("");
 
+  // Confirmation Modal State
+  const [pendingAction, setPendingAction] = useState<'RESET' | 'LOGOUT' | null>(null);
+
   // Audio/TTS Refs
   const questionReadRef = useRef(false);
+
+  // --- TOUR CONFIGURATION ---
+  const TOUR_STEPS: TourStep[] = [
+    {
+      title: "Bem-vindo ao Guia",
+      content: "Vamos fazer um tour rápido para você aprender a configurar e utilizar todos os recursos do JW Quiz. Clique em 'Próximo' para começar.",
+      position: 'center'
+    },
+    {
+      targetId: 'btn-theme',
+      title: "Tema Visual",
+      content: "Alterne entre modo Claro, Escuro ou Automático (Sistema) para maior conforto visual.",
+      position: 'bottom'
+    },
+    {
+      targetId: 'btn-sound',
+      title: "Efeitos Sonoros",
+      content: "Ative ou desative os sons de clique, acerto, erro e contagem regressiva.",
+      position: 'bottom'
+    },
+    {
+      targetId: 'btn-tts',
+      title: "Narração (TTS)",
+      content: "Escolha entre 'Voz Clássica' (navegador) ou 'Voz Natural' (IA) para ler as perguntas automaticamente. Você também pode desativar a leitura.",
+      position: 'bottom'
+    },
+    {
+      targetId: 'btn-zoom',
+      title: "Zoom da Interface",
+      content: "Aumente ou diminua o tamanho dos textos e botões para melhorar a acessibilidade.",
+      position: 'bottom'
+    },
+    {
+      targetId: 'btn-fullscreen',
+      title: "Tela Cheia",
+      content: "Entre em modo imersivo para evitar distrações durante o quiz.",
+      position: 'bottom'
+    },
+    {
+      targetId: 'btn-home',
+      title: "Reiniciar",
+      content: "Volte para a tela inicial a qualquer momento para configurar um novo jogo.",
+      position: 'bottom'
+    },
+    // Setup - Tab 1
+    {
+      targetId: 'field-mode',
+      title: "Passo 1: Tema",
+      content: "Escolha o escopo do seu quiz. 'Geral' abrange tópicos variados. 'Livros' foca em um livro bíblico específico. 'Assunto Específico' permite que você digite qualquer tema teocrático.",
+      position: 'top',
+      onEnter: () => setSetupStep(1)
+    },
+    {
+      targetId: 'field-difficulty',
+      title: "Dificuldade",
+      content: "Ajuste a profundidade das perguntas. 'Difícil' tende a pedir detalhes mais específicos e raciocínios doutrinários.",
+      position: 'top'
+    },
+    {
+      targetId: 'field-temperature',
+      title: "Criatividade",
+      content: "Define o nível de variedade. 'Conservador' segue padrões mais previsíveis. 'Criativo' gera perguntas mais inesperadas e variadas.",
+      position: 'top'
+    },
+    {
+      targetId: 'field-format',
+      title: "Formato",
+      content: "Escolha entre Múltipla Escolha, Verdadeiro/Falso ou Resposta Livre (onde você escreve e a IA avalia).",
+      position: 'top'
+    },
+    // Setup - Tab 2
+    {
+      targetId: 'field-team-mode',
+      title: "Passo 2: Modo Competição",
+      content: "Ative para adicionar times e manter um placar separado. Ótimo para Adoração em Família.",
+      position: 'top',
+      onEnter: () => setSetupStep(2)
+    },
+    {
+      targetId: 'field-count',
+      title: "Quantidade",
+      content: "Defina quantas perguntas terá o quiz. Se estiver em times, você pode definir também quantas perguntas ocorrem por rodada.",
+      position: 'top'
+    },
+    {
+      targetId: 'field-timer',
+      title: "Temporizador",
+      content: "Adicione pressão de tempo para deixar o jogo mais dinâmico.",
+      position: 'top'
+    },
+    // Setup - Tab 3
+    {
+      targetId: 'setup-form-container', 
+      title: "Passo 3: Ajudas",
+      content: "Configure quantas dicas podem ser usadas. 'Dica do Sistema' mostra uma pista simples. 'Perguntar ao Chat' permite conversar com a IA para tirar dúvidas.",
+      position: 'top',
+      onEnter: () => setSetupStep(3)
+    },
+    {
+      title: "Ações Especiais & Contestar",
+      content: "Às vezes a IA erra! Na última pergunta deste Tutorial, colocamos um erro de propósito. Quando chegar na tela de placar final, clique em 'Revisar Respostas' e use o botão 'Contestar' para corrigir a pergunta ruim.",
+      position: 'center',
+      onEnter: () => setSetupStep(1) // Reset form visual state
+    },
+    {
+      title: "Vamos Praticar!",
+      content: "Agora que você conhece a interface, vamos iniciar um Modo Tutorial rápido para você jogar uma partida de teste. Clique em 'Vamos lá' para começar.",
+      position: 'center'
+    }
+  ];
 
   // --- Initialization ---
 
@@ -140,13 +263,28 @@ function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-      document.body.classList.add('dark');
+    
+    const applyTheme = (isDark: boolean) => {
+        if (isDark) {
+            root.classList.add('dark');
+            document.body.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+            document.body.classList.remove('dark');
+        }
+    };
+
+    if (theme === 'system') {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        applyTheme(mediaQuery.matches);
+
+        const handler = (e: MediaQueryListEvent) => applyTheme(e.matches);
+        mediaQuery.addEventListener('change', handler);
+        return () => mediaQuery.removeEventListener('change', handler);
     } else {
-      root.classList.remove('dark');
-      document.body.classList.remove('dark');
+        applyTheme(theme === 'dark');
     }
+
     localStorage.setItem('jw-quiz-theme', theme);
   }, [theme]);
 
@@ -265,6 +403,9 @@ function App() {
         
         // Prevent action if in cooldown or error state
         if (cooldownTime > 0 || errorDetail) return;
+        
+        // Prevent if modal is open
+        if (pendingAction) return;
 
         // Prevent page scroll for space and button clicks for enter to avoid double triggering
         e.preventDefault(); 
@@ -285,13 +426,22 @@ function App() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [gameState, isCurrentQuestionAnswered, isReviewing, reviewIndex, quizData, currentQuestionIndex, cooldownTime, errorDetail]);
+  }, [gameState, isCurrentQuestionAnswered, isReviewing, reviewIndex, quizData, currentQuestionIndex, cooldownTime, errorDetail, pendingAction]);
 
   const handleSoundToggle = () => {
     const newState = !soundEnabled;
     setSoundEnabled(newState);
     setGlobalSoundState(newState);
     localStorage.setItem('jw-quiz-sound', String(newState));
+  };
+
+  const handleThemeToggle = () => {
+    playSound('click');
+    setTheme(prev => {
+      if (prev === 'dark') return 'light';
+      if (prev === 'light') return 'system';
+      return 'dark';
+    });
   };
   
   const handleTTSSelection = (selection: 'browser' | 'gemini' | 'off') => {
@@ -320,6 +470,49 @@ function App() {
         document.exitFullscreen();
       }
     }
+  };
+
+  // --- TUTORIAL HANDLER ---
+  const handleStartTutorial = () => {
+    playSound('click');
+    setLoading(true);
+    setLoadingMessage("Preparando tutorial...");
+    
+    // Simulate brief loading for UX
+    setTimeout(() => {
+        // Setup Tutorial Mode
+        setIsTutorialMode(true);
+        // Ensure tutorial uses current TTS config state if enabled globally, but for consistency we use the hardcoded structure 
+        // patched with current global TTS enabled state if needed, though quizConfig.tts is mostly a record.
+        const tutorialConfig = {
+            ...TUTORIAL_CONFIG,
+            tts: {
+                ...TUTORIAL_CONFIG.tts,
+                enabled: ttsEnabled // Match global state to avoid confusion
+            }
+        };
+        setQuizConfig(tutorialConfig);
+        setQuizData(TUTORIAL_DATA);
+        
+        // Setup Dummy Team
+        setTeams([{
+            id: 'solo',
+            name: 'Aluno',
+            color: '#10b981', // Tutorial green
+            score: 0,
+            correctCount: 0,
+            wrongCount: 0,
+            hintsUsed: 0
+        }]);
+        
+        // Initial States
+        setTimeLimit(TUTORIAL_CONFIG.timeLimit);
+        setHintsRemaining(TUTORIAL_CONFIG.maxHints);
+        setCooldownTime(0);
+        
+        setGameState('READY_CHECK');
+        setLoading(false);
+    }, 800);
   };
 
   // --- ROBUST ERROR HANDLING ---
@@ -479,8 +672,12 @@ function App() {
 
   const handleRestartSameSettings = () => {
     if (quizConfig) {
-      stopSpeech();
-      handleGenerate(quizConfig);
+        if (isTutorialMode) {
+            handleStartTutorial();
+        } else {
+            stopSpeech();
+            handleGenerate(quizConfig);
+        }
     }
   };
 
@@ -569,6 +766,7 @@ function App() {
     setUserAnswers(newAnswers);
 
     // TTS Feedback (Only in play mode generally, or if config allows)
+    // Fixed: Now respects global ttsEnabled even in Tutorial Mode
     if (!isReviewing && ttsEnabled) {
       const feedback = result.score === 0 ? "Resposta incorreta." : (result.score === 1 ? "Resposta correta!" : `Parcialmente correto. ${result.score} pontos.`);
       // Pass apiKey for Gemini TTS support
@@ -755,7 +953,22 @@ function App() {
     setCountdownValue(3);
   };
 
-  const handleReset = () => {
+  // --- ACTIONS WITH CONFIRMATION ---
+
+  const handleResetRequest = () => {
+    if (gameState === 'SETUP') {
+        // No confirmation needed if already in setup
+        executeReset();
+    } else {
+        setPendingAction('RESET');
+    }
+  };
+
+  const handleLogoutRequest = () => {
+    setPendingAction('LOGOUT');
+  };
+
+  const executeReset = () => {
     stopSpeech();
     setQuizData(null);
     setErrorDetail(null);
@@ -764,8 +977,19 @@ function App() {
     setIsSkipping(false);
     setCooldownTime(0);
     setVoidedIndices(new Set());
-    // Stop loading just in case
+    setIsTutorialMode(false); 
+    setSetupStep(1); 
     setLoading(false);
+    setPendingAction(null);
+  };
+
+  const executeLogout = () => {
+    logout();
+    setPendingAction(null);
+  };
+
+  const cancelPendingAction = () => {
+    setPendingAction(null);
   };
 
   const getTimerStyles = () => {
@@ -825,6 +1049,56 @@ function App() {
         </div>
       )}
 
+      {/* CONFIRMATION MODAL */}
+      {pendingAction && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-jw-card max-w-sm w-full rounded-2xl shadow-2xl border border-gray-600/50 overflow-hidden transform transition-all scale-100">
+                <div className="p-6">
+                    <div className="flex flex-col items-center text-center mb-6">
+                        <div className={`p-4 rounded-full mb-4 ${pendingAction === 'LOGOUT' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-jw-text mb-2">
+                            {pendingAction === 'LOGOUT' ? 'Sair do Aplicativo?' : 'Reiniciar Quiz?'}
+                        </h3>
+                        <p className="text-sm opacity-70 leading-relaxed">
+                            {pendingAction === 'LOGOUT' 
+                                ? 'Deseja realmente sair e remover a chave de API deste dispositivo? Você precisará inseri-la novamente.' 
+                                : 'Todo o progresso do jogo atual será perdido e você voltará para a tela inicial.'}
+                        </p>
+                    </div>
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={cancelPendingAction}
+                            className="flex-1 py-3 bg-jw-hover text-jw-text rounded-lg font-medium hover:bg-opacity-80 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={pendingAction === 'LOGOUT' ? executeLogout : executeReset}
+                            className={`flex-1 py-3 text-white rounded-lg font-bold shadow-lg hover:bg-opacity-90 transition-colors ${pendingAction === 'LOGOUT' ? 'bg-red-600' : 'bg-jw-blue'}`}
+                        >
+                            Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* TOUR OVERLAY */}
+      <TourOverlay 
+        steps={TOUR_STEPS} 
+        isOpen={isGuideOpen} 
+        onClose={() => setIsGuideOpen(false)}
+        onComplete={() => {
+            setIsGuideOpen(false);
+            setTimeout(handleStartTutorial, 100);
+        }}
+      />
+
       {/* ERROR MODAL */}
       {errorDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
@@ -864,26 +1138,48 @@ function App() {
           <div className="flex items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 opacity-80"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
             <h1 className="text-base font-semibold tracking-wide truncate">JW Quiz Creator</h1>
+            {isTutorialMode && (
+                <span className="bg-emerald-500 text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ml-2 animate-fade-in shadow-sm hidden md:inline-block">
+                    Modo Tutorial
+                </span>
+            )}
           </div>
 
           {/* Right: Controls */}
           <div className="flex items-center gap-2 md:gap-4">
             
+            {/* Guide/Tutorial Button (Combined) */}
+            {!isQuizActive && (
+              <button
+                onClick={() => { setIsGuideOpen(true); playSound('click'); }}
+                className="p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100"
+                title="Guia Interativo e Tutorial"
+              >
+                <div className="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center font-bold text-xs">
+                    ?
+                </div>
+              </button>
+            )}
+
             {/* 1. Theme Toggle */}
             <button 
-               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+               id="btn-theme"
+               onClick={handleThemeToggle}
                className="p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100"
-               title="Tema Escuro/Claro"
+               title={`Tema: ${theme === 'system' ? 'Automático' : (theme === 'dark' ? 'Escuro' : 'Claro')}`}
              >
                {theme === 'dark' ? (
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>
-               ) : (
+               ) : theme === 'light' ? (
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
+               ) : (
+                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" /></svg>
                )}
             </button>
 
             {/* 2. Sound Toggle */}
             <button 
+               id="btn-sound"
                onClick={handleSoundToggle}
                className={`p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100 ${!soundEnabled && 'opacity-60'}`}
                title="Efeitos Sonoros"
@@ -896,7 +1192,7 @@ function App() {
             </button>
 
             {/* 3. TTS Selection Menu */}
-            <div className="relative" ref={ttsMenuRef}>
+            <div id="btn-tts" className="relative" ref={ttsMenuRef}>
                <button 
                   onClick={() => setIsTTSMenuOpen(!isTTSMenuOpen)}
                   className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors px-3 py-1.5 rounded-lg border border-white/10"
@@ -943,7 +1239,7 @@ function App() {
             </div>
 
             {/* 3.5 Zoom Controls */}
-             <div className="flex items-center gap-1 bg-white/10 rounded-lg p-1 border border-white/10 mr-1">
+             <div id="btn-zoom" className="flex items-center gap-1 bg-white/10 rounded-lg p-1 border border-white/10 mr-1">
                <button 
                  onClick={() => setZoomLevel(prev => Math.max(0.75, prev - 0.05))}
                  className="p-1 hover:bg-white/20 rounded transition-colors text-white/90"
@@ -969,6 +1265,7 @@ function App() {
 
             {/* 4. Fullscreen Toggle */}
             <button
+               id="btn-fullscreen"
                onClick={toggleFullscreen}
                className="p-2 rounded-full hover:bg-black/10 transition-colors opacity-90 hover:opacity-100"
                title={isFullscreen ? "Sair da Tela Cheia" : "Tela Cheia"}
@@ -986,7 +1283,8 @@ function App() {
 
             {/* 5. Restart / Home Button (ALWAYS VISIBLE) */}
              <button 
-               onClick={handleReset} 
+               id="btn-home"
+               onClick={handleResetRequest} 
                onMouseEnter={() => playSound('hover')} 
                className="p-2 rounded-full hover:bg-black/10 transition-colors text-white opacity-90 hover:opacity-100"
                title="Voltar ao Início"
@@ -1048,200 +1346,212 @@ function App() {
          </div>
       )}
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 container mx-auto px-4 md:px-6 overflow-y-auto flex flex-col justify-center relative pb-20 scrollbar-thin scrollbar-thumb-gray-800">
-        
-        {/* SETUP */}
-        {gameState === 'SETUP' && (
-          <div className="flex flex-col items-center animate-fade-in py-6 md:py-10">
-             <div className="text-center mb-6 md:mb-10 max-w-2xl px-2">
-               <h2 className="text-3xl md:text-4xl font-bold text-jw-text mb-4 tracking-tight">Teste seu Conhecimento</h2>
-               <p className="text-sm md:text-lg opacity-70">Selecione os parâmetros abaixo para gerar um quiz personalizado.</p>
-             </div>
-             <SetupForm 
-                onGenerate={handleGenerate} 
-                isLoading={loading} 
-                ttsEnabled={ttsEnabled}
-             />
-          </div>
-        )}
+      {/* SCROLLABLE WRAPPER FOR MAIN CONTENT AND FOOTER */}
+      <div className="flex-1 overflow-y-auto flex flex-col scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent relative z-0">
+          
+          {/* MAIN CONTENT */}
+          <main className="flex-1 container mx-auto px-4 md:px-6 flex flex-col justify-center relative pb-10 min-h-[max-content]">
+            
+            {/* SETUP */}
+            {gameState === 'SETUP' && (
+              <div className="flex flex-col items-center animate-fade-in py-6 md:py-10">
+                 <div className="text-center mb-6 md:mb-10 max-w-2xl px-2">
+                   <h2 className="text-3xl md:text-4xl font-bold text-jw-text mb-4 tracking-tight">Teste seu Conhecimento</h2>
+                   <p className="text-sm md:text-lg opacity-70">Selecione os parâmetros abaixo para gerar um quiz personalizado.</p>
+                 </div>
+                 <SetupForm 
+                    onGenerate={handleGenerate} 
+                    isLoading={loading} 
+                    ttsEnabled={ttsEnabled}
+                    forcedStep={setupStep} // FIXED: Always pass setupStep
+                    onStepChange={(step) => setSetupStep(step)} // Sync state
+                 />
+              </div>
+            )}
 
-        {/* READY CHECK (CONFIRMATION SCREEN) */}
-        {gameState === 'READY_CHECK' && quizData && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
-                <div className="bg-[#1e1e1e] p-8 rounded-2xl shadow-2xl text-center border border-gray-800 max-w-sm w-full flex flex-col items-center">
-                    
-                    {/* Check Icon */}
-                    <div className="w-12 h-12 rounded-full border-2 border-jw-blue flex items-center justify-center mb-6 text-jw-blue shadow-[0_0_15px_rgba(91,60,136,0.3)]">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                    </div>
+            {/* READY CHECK (CONFIRMATION SCREEN) */}
+            {gameState === 'READY_CHECK' && quizData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in p-4">
+                    <div className="bg-[#1e1e1e] p-8 rounded-2xl shadow-2xl text-center border border-gray-800 max-w-sm w-full flex flex-col items-center">
+                        
+                        {/* Check Icon */}
+                        <div className="w-12 h-12 rounded-full border-2 border-jw-blue flex items-center justify-center mb-6 text-jw-blue shadow-[0_0_15px_rgba(91,60,136,0.3)]">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                        </div>
 
-                    <h2 className="text-2xl font-bold text-white mb-6">Tudo pronto?</h2>
+                        <h2 className="text-2xl font-bold text-white mb-6">Tudo pronto?</h2>
 
-                    <div className="w-full mb-8">
-                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">TEMA</span>
-                         <h3 className="text-lg font-medium text-gray-200 mt-2 leading-tight">
-                            {quizData.title}
-                         </h3>
-                    </div>
+                        <div className="w-full mb-8">
+                             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">TEMA</span>
+                             <h3 className="text-lg font-medium text-gray-200 mt-2 leading-tight">
+                                {quizData.title}
+                             </h3>
+                        </div>
 
-                    <button 
-                        onClick={handleConfirmStart}
-                        className="w-full py-3 bg-jw-blue text-white font-bold rounded-lg shadow-lg hover:bg-opacity-90 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2"
-                    >
-                        Estou Pronto 
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                        </svg>
-                    </button>
-                    
-                </div>
-            </div>
-        )}
-
-        {/* COUNTDOWN */}
-        {gameState === 'COUNTDOWN' && (
-             <div 
-                className="fixed inset-0 z-50 flex flex-col items-center justify-center animate-fade-in transition-colors duration-500"
-                style={{ backgroundColor: teams[currentTeamIndex]?.color || '#5b3c88' }}
-             >
-                <div key={countdownValue} className="text-[12rem] md:text-[16rem] font-black text-white/20 animate-ping absolute scale-150">
-                   {countdownValue > 0 ? countdownValue : "JÁ!"}
-                </div>
-                <div key={`static-${countdownValue}`} className="text-[8rem] md:text-[10rem] font-black text-white relative z-10 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] animate-bounce-short">
-                   {countdownValue > 0 ? countdownValue : "JÁ!"}
-                </div>
-                <div className="mt-8 flex flex-col items-center">
-                    <p className="text-xl opacity-80 uppercase tracking-[0.5em] font-light text-white mb-2">Prepare-se</p>
-                    <div className="text-4xl font-bold text-white bg-black/20 px-6 py-2 rounded-xl">
-                        {teams[currentTeamIndex]?.name}
+                        <button 
+                            onClick={handleConfirmStart}
+                            className="w-full py-3 bg-jw-blue text-white font-bold rounded-lg shadow-lg hover:bg-opacity-90 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2"
+                        >
+                            Estou Pronto 
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                            </svg>
+                        </button>
+                        
                     </div>
                 </div>
-             </div>
-        )}
+            )}
 
-        {/* PLAYING */}
-        {gameState === 'PLAYING' && quizData && (
-          <div className="w-full animate-fade-in relative h-full flex flex-col">
-             <div className="flex-1 flex flex-col justify-center">
-               <QuizCard 
-                 key={quizData.questions[currentQuestionIndex].id}
-                 question={quizData.questions[currentQuestionIndex]}
-                 index={currentQuestionIndex}
-                 total={quizData.questions.length}
-                 timeLeft={timeLeft}
-                 onAnswer={handleAnswer}
-                 isTimeUp={quizConfig?.enableTimer && timeLeft === 0}
-                 hintsRemaining={hintsRemaining}
-                 onRevealHint={handleUseHint}
-                 activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
-                 activeTeamColor={quizConfig?.isTeamMode ? teams[currentTeamIndex].color : undefined}
-                 ttsConfig={ttsConfig}
-                 allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
-                 allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
-                 onSkip={handleSkipQuestion}
-                 isSkipping={isSkipping}
-                 apiKey={apiKey}
-               />
-             </div>
-          </div>
-        )}
-
-        {/* ROUND SUMMARY */}
-        {gameState === 'ROUND_SUMMARY' && (
-           <div className="animate-fade-in py-10 w-full max-w-3xl mx-auto flex flex-col items-center justify-center">
-             <div className="bg-jw-card p-6 md:p-10 rounded-2xl shadow-2xl text-center border border-gray-700/50 w-full">
-                <h2 className="text-2xl md:text-3xl font-bold mb-6 text-jw-blue">Fim da Rodada {currentRound}</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                  {teams.map(t => (
-                    <div key={t.id} className="bg-jw-hover p-4 rounded-lg border-l-4" style={{ borderLeftColor: t.color }}>
-                      <h3 className="font-bold text-lg mb-2">{t.name}</h3>
-                      <div className="text-4xl font-bold text-jw-text mb-1">{t.score}</div>
-                      <div className="text-xs opacity-60">pontos</div>
+            {/* COUNTDOWN */}
+            {gameState === 'COUNTDOWN' && (
+                 <div 
+                    className="fixed inset-0 z-50 flex flex-col items-center justify-center animate-fade-in transition-colors duration-500"
+                    style={{ backgroundColor: teams[currentTeamIndex]?.color || '#5b3c88' }}
+                 >
+                    <div key={countdownValue} className="text-[12rem] md:text-[16rem] font-black text-white/20 animate-ping absolute scale-150">
+                       {countdownValue > 0 ? countdownValue : "JÁ!"}
                     </div>
-                  ))}
-                </div>
-                <button 
-                  onClick={handleNextRound} 
-                  onMouseEnter={() => playSound('hover')}
-                  className="bg-jw-blue text-white px-8 py-3 rounded-full font-bold shadow-lg hover:scale-105 transition-transform w-full md:w-auto"
-                >
-                  Próxima Rodada
-                </button>
-             </div>
-           </div>
-        )}
+                    <div key={`static-${countdownValue}`} className="text-[8rem] md:text-[10rem] font-black text-white relative z-10 drop-shadow-[0_10px_30px_rgba(0,0,0,0.5)] animate-bounce-short">
+                       {countdownValue > 0 ? countdownValue : "JÁ!"}
+                    </div>
+                    <div className="mt-8 flex flex-col items-center">
+                        <p className="text-xl opacity-80 uppercase tracking-[0.5em] font-light text-white mb-2">Prepare-se</p>
+                        <div className="text-4xl font-bold text-white bg-black/20 px-6 py-2 rounded-xl">
+                            {teams[currentTeamIndex]?.name}
+                        </div>
+                    </div>
+                 </div>
+            )}
 
-        {/* FINISHED */}
-        {gameState === 'FINISHED' && quizData && (
-          <div className="animate-fade-in py-10 w-full max-w-5xl mx-auto flex flex-col items-center">
-             {!isReviewing && (
-               <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                 {/* Overall Score */}
-                 <div className="bg-jw-card border border-jw-hover rounded-2xl p-6 md:p-8 text-center shadow-xl md:col-span-2">
-                    <h3 className="opacity-60 uppercase tracking-widest text-sm font-bold mb-4">Placar Final</h3>
-                    <div className="flex flex-col md:flex-row gap-6 justify-center">
-                      {teams.map((t, i) => (
-                         <div 
-                            key={t.id} 
-                            className={`flex-1 p-6 rounded-xl border-t-4 ${i === 0 && teams.length > 1 && teams[0].score > teams[1].score ? 'bg-yellow-500/10 border-yellow-500' : 'bg-jw-hover'}`}
-                            style={{ borderTopColor: t.color }}
-                         >
-                            <h4 className="text-xl font-bold mb-2">{t.name}</h4>
-                            <div className="text-5xl font-bold mb-2" style={{ color: t.color }}>{t.score} <span className="text-xl text-gray-500">/ {t.correctCount + t.wrongCount}</span></div>
-                            <div className="space-y-1 text-sm opacity-70">
-                               <p>Acertos: {t.correctCount}</p>
-                               <p>Erros: {t.wrongCount}</p>
-                               <p>Dicas usadas: {t.hintsUsed}</p>
-                               <p>Aproveitamento: {Math.round((t.correctCount / (t.correctCount + t.wrongCount || 1)) * 100)}%</p>
-                            </div>
-                         </div>
+            {/* PLAYING */}
+            {gameState === 'PLAYING' && quizData && (
+              <div className="w-full animate-fade-in relative h-full flex flex-col">
+                 <div className="flex-1 flex flex-col justify-center">
+                   <QuizCard 
+                     key={quizData.questions[currentQuestionIndex].id}
+                     question={quizData.questions[currentQuestionIndex]}
+                     index={currentQuestionIndex}
+                     total={quizData.questions.length}
+                     timeLeft={timeLeft}
+                     onAnswer={handleAnswer}
+                     isTimeUp={quizConfig?.enableTimer && timeLeft === 0}
+                     hintsRemaining={hintsRemaining}
+                     onRevealHint={handleUseHint}
+                     activeTeamName={quizConfig?.isTeamMode ? teams[currentTeamIndex].name : undefined}
+                     activeTeamColor={quizConfig?.isTeamMode ? teams[currentTeamIndex].color : undefined}
+                     ttsConfig={ttsConfig}
+                     allowAskAi={quizConfig?.hintTypes.includes(HintType.ASK_AI)}
+                     allowStandardHint={quizConfig?.hintTypes.includes(HintType.STANDARD)}
+                     onSkip={handleSkipQuestion}
+                     isSkipping={isSkipping}
+                     apiKey={apiKey}
+                   />
+                 </div>
+              </div>
+            )}
+
+            {/* ROUND SUMMARY */}
+            {gameState === 'ROUND_SUMMARY' && (
+               <div className="animate-fade-in py-10 w-full max-w-3xl mx-auto flex flex-col items-center justify-center">
+                 <div className="bg-jw-card p-6 md:p-10 rounded-2xl shadow-2xl text-center border border-gray-700/50 w-full">
+                    <h2 className="text-2xl md:text-3xl font-bold mb-6 text-jw-blue">Fim da Rodada {currentRound}</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                      {teams.map(t => (
+                        <div key={t.id} className="bg-jw-hover p-4 rounded-lg border-l-4" style={{ borderLeftColor: t.color }}>
+                          <h3 className="font-bold text-lg mb-2">{t.name}</h3>
+                          <div className="text-4xl font-bold text-jw-text mb-1">{t.score}</div>
+                          <div className="text-xs opacity-60">pontos</div>
+                        </div>
                       ))}
                     </div>
+                    <button 
+                      onClick={handleNextRound} 
+                      onMouseEnter={() => playSound('hover')}
+                      className="bg-jw-blue text-white px-8 py-3 rounded-full font-bold shadow-lg hover:scale-105 transition-transform w-full md:w-auto"
+                    >
+                      Próxima Rodada
+                    </button>
                  </div>
                </div>
-             )}
+            )}
 
-             {!isReviewing && (
-                <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
-                   <button onClick={() => { setIsReviewing(true); setReviewIndex(0); }} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-jw-card border border-gray-500/30 text-jw-text rounded-full font-medium hover:bg-jw-hover transition-colors flex items-center justify-center gap-2">Revisar Respostas</button>
-                   <button onClick={handleRestartSameSettings} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-emerald-600 text-white rounded-full font-medium hover:bg-emerald-500 transition-colors flex items-center justify-center gap-2 shadow-lg">Jogar Novamente</button>
-                   <button onClick={handleReset} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-jw-blue text-white rounded-full font-medium hover:bg-opacity-90 transition-colors flex items-center justify-center gap-2">Novo Quiz</button>
-                </div>
-             )}
+            {/* FINISHED */}
+            {gameState === 'FINISHED' && quizData && (
+              <div className="animate-fade-in py-10 w-full max-w-5xl mx-auto flex flex-col items-center">
+                 {!isReviewing && (
+                   <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                     {/* Overall Score */}
+                     <div className="bg-jw-card border border-jw-hover rounded-2xl p-6 md:p-8 text-center shadow-xl md:col-span-2">
+                        <h3 className="opacity-60 uppercase tracking-widest text-sm font-bold mb-4">Placar Final</h3>
+                        <div className="flex flex-col md:flex-row gap-6 justify-center">
+                          {teams.map((t, i) => (
+                             <div 
+                                key={t.id} 
+                                className={`flex-1 p-6 rounded-xl border-t-4 ${i === 0 && teams.length > 1 && teams[0].score > teams[1].score ? 'bg-yellow-500/10 border-yellow-500' : 'bg-jw-hover'}`}
+                                style={{ borderTopColor: t.color }}
+                             >
+                                <h4 className="text-xl font-bold mb-2">{t.name}</h4>
+                                <div className="text-5xl font-bold mb-2" style={{ color: t.color }}>{t.score} <span className="text-xl text-gray-500">/ {t.correctCount + t.wrongCount}</span></div>
+                                <div className="space-y-1 text-sm opacity-70">
+                                   <p>Acertos: {t.correctCount}</p>
+                                   <p>Erros: {t.wrongCount}</p>
+                                   <p>Dicas usadas: {t.hintsUsed}</p>
+                                   <p>Aproveitamento: {Math.round((t.correctCount / (t.correctCount + t.wrongCount || 1)) * 100)}%</p>
+                                </div>
+                             </div>
+                          ))}
+                        </div>
+                     </div>
+                   </div>
+                 )}
 
-             {isReviewing && (
-               <div className="w-full flex flex-col h-full animate-fade-in-up">
-                 <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-jw-text">Revisão: Pergunta {reviewIndex + 1}</h2>
-                    <button onClick={() => setIsReviewing(false)} onMouseEnter={() => playSound('hover')} className="opacity-60 hover:opacity-100 text-jw-text flex items-center gap-1">Fechar</button>
-                 </div>
-                 <div className="flex-1 flex flex-col justify-center">
-                    <QuizCard 
-                        key={quizData.questions[reviewIndex].id} // Added key to force re-mount on replacement
-                        question={quizData.questions[reviewIndex]} 
-                        index={reviewIndex} 
-                        total={quizData.questions.length}
-                        showAnswerKey={userAnswers[reviewIndex] !== null && userAnswers[reviewIndex] !== undefined}
-                        forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
-                        ttsConfig={ttsConfig}
-                        onVoid={() => handleReplaceQuestion(reviewIndex)}
-                        onAnswer={handleAnswer}
-                        apiKey={apiKey}
-                    />
-                 </div>
-                 <div className="flex justify-between items-center mt-8 pb-4">
-                    <button onClick={() => { playSound('click'); if(reviewIndex>0) setReviewIndex(i=>i-1)}} onMouseEnter={() => playSound('hover')} disabled={reviewIndex === 0} className="px-6 py-3 bg-jw-hover text-jw-text rounded-full font-medium hover:bg-opacity-80 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">Anterior</button>
-                    <button onClick={() => setIsReviewing(false)} onMouseEnter={() => playSound('hover')} className="opacity-50 hover:opacity-100 text-sm font-medium transition-opacity">Voltar</button>
-                    <button onClick={() => { playSound('click'); if(reviewIndex<quizData.questions.length-1) setReviewIndex(i=>i+1)}} onMouseEnter={() => playSound('hover')} disabled={reviewIndex === quizData.questions.length - 1} className="px-6 py-3 bg-jw-hover text-jw-text rounded-full font-medium hover:bg-opacity-80 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">Próximo</button>
-                 </div>
-               </div>
-             )}
-          </div>
-        )}
-      </main>
+                 {!isReviewing && (
+                    <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
+                       <button onClick={() => { setIsReviewing(true); setReviewIndex(0); }} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-jw-card border border-gray-500/30 text-jw-text rounded-full font-medium hover:bg-jw-hover transition-colors flex items-center justify-center gap-2">Revisar Respostas</button>
+                       <button onClick={handleRestartSameSettings} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-emerald-600 text-white rounded-full font-medium hover:bg-emerald-500 transition-colors flex items-center justify-center gap-2 shadow-lg">Jogar Novamente</button>
+                       <button onClick={handleResetRequest} onMouseEnter={() => playSound('hover')} className="flex-1 py-3 px-6 bg-jw-blue text-white rounded-full font-medium hover:bg-opacity-90 transition-colors flex items-center justify-center gap-2">Novo Quiz</button>
+                    </div>
+                 )}
+
+                 {isReviewing && (
+                   <div className="w-full flex flex-col h-full animate-fade-in-up">
+                     <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-xl font-bold text-jw-text">Revisão: Pergunta {reviewIndex + 1}</h2>
+                        <button onClick={() => setIsReviewing(false)} onMouseEnter={() => playSound('hover')} className="opacity-60 hover:opacity-100 text-jw-text flex items-center gap-1">Fechar</button>
+                     </div>
+                     <div className="flex-1 flex flex-col justify-center">
+                        <QuizCard 
+                            key={quizData.questions[reviewIndex].id} // Added key to force re-mount on replacement
+                            question={quizData.questions[reviewIndex]} 
+                            index={reviewIndex} 
+                            total={quizData.questions.length}
+                            showAnswerKey={userAnswers[reviewIndex] !== null && userAnswers[reviewIndex] !== undefined}
+                            forceSelectedOption={typeof userAnswers[reviewIndex] === 'number' ? userAnswers[reviewIndex] as number : null} 
+                            ttsConfig={ttsConfig}
+                            onVoid={() => handleReplaceQuestion(reviewIndex)}
+                            onAnswer={handleAnswer}
+                            apiKey={apiKey}
+                        />
+                     </div>
+                     <div className="flex justify-between items-center mt-8 pb-4">
+                        <button onClick={() => { playSound('click'); if(reviewIndex>0) setReviewIndex(i=>i-1)}} onMouseEnter={() => playSound('hover')} disabled={reviewIndex === 0} className="px-6 py-3 bg-jw-hover text-jw-text rounded-full font-medium hover:bg-opacity-80 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">Anterior</button>
+                        <button onClick={() => setIsReviewing(false)} onMouseEnter={() => playSound('hover')} className="opacity-50 hover:opacity-100 text-sm font-medium transition-opacity">Voltar</button>
+                        <button onClick={() => { playSound('click'); if(reviewIndex<quizData.questions.length-1) setReviewIndex(i=>i+1)}} onMouseEnter={() => playSound('hover')} disabled={reviewIndex === quizData.questions.length - 1} className="px-6 py-3 bg-jw-hover text-jw-text rounded-full font-medium hover:bg-opacity-80 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2 transition-colors">Próximo</button>
+                     </div>
+                   </div>
+                 )}
+              </div>
+            )}
+          </main>
+
+          {/* Footer / Change Key (Now scrolls with content) */}
+          <footer className="w-full shrink-0 py-6 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity flex flex-col gap-1 pb-24 md:pb-12">
+            <button onClick={handleLogoutRequest} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
+            <span>Versão: 1.0.3</span>
+          </footer>
+      </div>
 
       {/* FAB Next */}
       {gameState === 'PLAYING' && isCurrentQuestionAnswered && (
@@ -1252,12 +1562,6 @@ function App() {
            </button>
          </div>
       )}
-
-      {/* Footer / Change Key */}
-      <footer className="shrink-0 py-4 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity flex flex-col gap-1">
-        <button onClick={logout} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
-        <span>Versão: 1.0.1</span>
-      </footer>
     </div>
   );
 }

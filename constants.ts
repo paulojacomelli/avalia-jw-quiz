@@ -1,5 +1,5 @@
 
-import { Difficulty, TopicMode, HintType, QuizFormat } from './types';
+import { Difficulty, TopicMode, HintType, QuizFormat, GeneratedQuiz, QuizConfig } from './types';
 
 export const BIBLE_BOOKS = [
   // Hebrew Scriptures
@@ -77,3 +77,85 @@ export const LOADING_MESSAGES = [
   "Recuperando dados... Tente lembrar o que foi dito na reunião de ontem!",
   "Dica Pro: Quem se prepara para a Sentinela acerta mais perguntas aqui."
 ];
+
+// --- TUTORIAL DATA ---
+
+export const TUTORIAL_CONFIG: QuizConfig = {
+  mode: TopicMode.GENERAL,
+  difficulty: Difficulty.EASY,
+  temperature: 1.0,
+  quizFormat: QuizFormat.MULTIPLE_CHOICE,
+  count: 4,
+  timeLimit: 120,
+  maxHints: 99,
+  hintTypes: [HintType.STANDARD, HintType.ASK_AI],
+  enableTimer: true,
+  enableTimerSound: true,
+  isTeamMode: false,
+  teams: [],
+  questionsPerRound: 4,
+  tts: {
+    enabled: true,
+    autoRead: true,
+    engine: 'browser', // Use browser for tutorial to be safe/fast
+    gender: 'female',
+    rate: 1.2,
+    volume: 1.0
+  }
+};
+
+export const TUTORIAL_DATA: GeneratedQuiz = {
+  title: "Tutorial Interativo: Aprenda a Jogar",
+  questions: [
+    {
+      id: "tut-1",
+      question: "Bem-vindo ao JW Quiz! Esta é uma pergunta de Múltipla Escolha. Para responder, você deve clicar na opção correta abaixo. Vamos testar?",
+      options: [
+        "Esta é a opção errada.",
+        "Esta também está incorreta.",
+        "Clique AQUI! Esta é a resposta certa.",
+        "Não clique nesta."
+      ],
+      correctAnswerIndex: 2,
+      reference: "Manual do Usuário",
+      hint: "A resposta correta pede explicitamente para você clicar nela.",
+      explanation: "Em perguntas de múltipla escolha, apenas uma alternativa é a correta. Ao acertar, você ganha pontos e avança."
+    },
+    {
+      id: "tut-2",
+      question: "Você pode usar 'Dicas' se estiver com dúvida. Tente clicar no botão de 'Ajuda' abaixo para ver uma dica sobre esta pergunta antes de responder.",
+      options: [
+        "Verdadeiro",
+        "Falso"
+      ],
+      correctAnswerIndex: 0,
+      reference: "Recursos do App",
+      hint: "Parabéns! Você encontrou a dica. A resposta é 'Verdadeiro'.",
+      explanation: "O sistema de dicas consome seus 'créditos de dica' disponíveis. Use com sabedoria! Além da Dica Padrão, você pode perguntar ao Chat IA."
+    },
+    {
+      id: "tut-3",
+      question: "Este é o modo 'Resposta Livre'. Aqui você pode digitar sua resposta ou usar o microfone para falar. A Inteligência Artificial lerá sua resposta e dará uma nota. Tente escrever 'Jeová' abaixo.",
+      options: [],
+      correctAnswerIndex: -1,
+      correctAnswerText: "Jeová",
+      reference: "Salmo 83:18",
+      hint: "O nome divino.",
+      explanation: "Na resposta livre, a avaliação é feita por IA, considerando o sentido da resposta, não apenas a ortografia exata."
+    },
+    {
+      id: "tut-4-wrong",
+      question: "ATENÇÃO: Esta é uma pergunta com ERRO PROPOSITAL. Quem construiu a Arca para sobreviver ao Dilúvio?",
+      options: [
+        "Moisés (Errado, mas marcado como certo pelo sistema)",
+        "Rei Davi",
+        "Apóstolo Paulo",
+        "Salomão"
+      ],
+      correctAnswerIndex: 0,
+      reference: "Gênesis 6 (Erro Simulado)",
+      hint: "A resposta certa seria Noé, mas ele não está nas opções. Responda qualquer coisa e avance.",
+      explanation: "EXCELENTE! Você notou que a resposta está errada (foi Moisés quem escreveu Gênesis, mas Noé fez a arca). Na tela de placar final, clique em 'REVISAR RESPOSTAS', vá até esta pergunta e use o botão 'CONTESTAR' para pedir à IA uma nova pergunta válida."
+    }
+  ]
+};

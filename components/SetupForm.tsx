@@ -7,17 +7,37 @@ import { stopSpeech } from '../utils/tts';
 interface SetupFormProps {
   onGenerate: (config: QuizConfig) => void;
   isLoading: boolean;
-  ttsEnabled: boolean; // Received from App global state
+  ttsEnabled: boolean;
+  // Props for external step control (Tour/Guide)
+  forcedStep?: number;
+  onStepChange?: (step: number) => void;
 }
 
 export const SetupForm: React.FC<SetupFormProps> = ({ 
   onGenerate, 
   isLoading,
-  ttsEnabled
+  ttsEnabled,
+  forcedStep,
+  onStepChange
 }) => {
   // --- Wizard State ---
-  const [currentStep, setCurrentStep] = useState(1);
+  const [internalStep, setInternalStep] = useState(1);
   const TOTAL_STEPS = 3;
+
+  // Use internal state unless forcedStep is provided
+  const currentStep = forcedStep !== undefined ? forcedStep : internalStep;
+
+  // Sync internal state if forcedStep changes
+  useEffect(() => {
+    if (forcedStep !== undefined) {
+      setInternalStep(forcedStep);
+    }
+  }, [forcedStep]);
+
+  const updateStep = (newStep: number) => {
+    setInternalStep(newStep);
+    if (onStepChange) onStepChange(newStep);
+  };
 
   // --- Quiz Config ---
   const [mode, setMode] = useState<TopicMode>(TopicMode.GENERAL);
@@ -62,13 +82,13 @@ export const SetupForm: React.FC<SetupFormProps> = ({
     
     playSound('click');
     if (currentStep < TOTAL_STEPS) {
-      setCurrentStep(c => c + 1);
+      updateStep(currentStep + 1);
     }
   };
 
   const handlePrevStep = () => {
     playSound('click');
-    if (currentStep > 1) setCurrentStep(c => c - 1);
+    if (currentStep > 1) updateStep(currentStep - 1);
   };
 
   const handleFinalSubmit = () => {
@@ -137,7 +157,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto bg-jw-card p-4 md:p-8 rounded-xl shadow-2xl border border-gray-700/30 transition-colors duration-300">
+    <div id="setup-form-container" className="w-full max-w-2xl mx-auto bg-jw-card p-4 md:p-8 rounded-xl shadow-2xl border border-gray-700/30 transition-colors duration-300">
       
       {/* WIZARD PROGRESS BAR */}
       <div className="mb-8">
@@ -160,7 +180,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
         {currentStep === 1 && (
           <div className="space-y-6 animate-fade-in">
             {/* Mode */}
-            <div>
+            <div id="field-mode">
               <label className="block text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Sobre o que será o Quiz?</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {MODE_OPTIONS.map((opt) => (
@@ -210,7 +230,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
             )}
 
             {/* Difficulty */}
-            <div>
+            <div id="field-difficulty">
               <label className="block text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Dificuldade</label>
               <div className="flex gap-2">
                 {DIFFICULTY_OPTIONS.map((opt) => (
@@ -225,7 +245,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
             </div>
 
             {/* Temperature Slider */}
-            <div className="animate-fade-in">
+            <div className="animate-fade-in" id="field-temperature">
               <div className="flex justify-between mb-2">
                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-200">
                   Criatividade
@@ -251,7 +271,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
             </div>
             
              {/* Quiz Format */}
-            <div>
+            <div id="field-format">
                <label className="block text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Formato</label>
                <div className="flex gap-2">
                  {FORMAT_OPTIONS.map((opt) => (
@@ -271,7 +291,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
         {currentStep === 2 && (
           <div className="space-y-6 animate-fade-in">
             {/* Team Mode Toggle */}
-            <div className="flex items-center justify-between p-4 bg-jw-hover/30 rounded-lg border border-gray-700/30">
+            <div id="field-team-mode" className="flex items-center justify-between p-4 bg-jw-hover/30 rounded-lg border border-gray-700/30">
               <div>
                 <span className="block text-sm font-bold text-gray-700 dark:text-gray-200">Modo Competição (Times)</span>
                 <span className="text-xs opacity-60">Jogar com amigos ou em família</span>
@@ -310,7 +330,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
 
             {/* Questions & Rounds */}
             <div className={`grid gap-6 ${isTeamMode ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
-               <div>
+               <div id="field-count">
                  <div className="flex justify-between mb-2">
                     <label className="block text-sm font-bold text-gray-700 dark:text-gray-200">Total de Perguntas</label>
                     <span className="text-sm font-bold text-jw-blue bg-jw-blue/10 px-2 py-0.5 rounded">{count}</span>
@@ -338,7 +358,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
             </div>
 
             {/* Timer Toggle */}
-            <div className="flex items-center justify-between p-4 bg-jw-hover/30 rounded-lg border border-gray-700/30">
+            <div id="field-timer" className="flex items-center justify-between p-4 bg-jw-hover/30 rounded-lg border border-gray-700/30">
               <div>
                 <span className="block text-sm font-bold text-gray-700 dark:text-gray-200">Usar Temporizador</span>
               </div>
@@ -366,9 +386,9 @@ export const SetupForm: React.FC<SetupFormProps> = ({
           </div>
         )}
 
-        {/* STEP 3: AJUDAS (TTS REMOVED) */}
+        {/* STEP 3: AJUDAS */}
         {currentStep === 3 && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-6 animate-fade-in" id="field-hints">
             {/* Hints Config */}
             <div>
               <div className="flex justify-between mb-2">
