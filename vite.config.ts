@@ -10,7 +10,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'JW Quiz Creator',
+        name: 'JW Quiz',
         short_name: 'JW Quiz',
         description: 'Teste seus conhecimentos teocráticos com IA',
         theme_color: '#5b3c88',
