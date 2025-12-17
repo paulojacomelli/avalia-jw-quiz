@@ -112,7 +112,7 @@ function App() {
   const TOUR_STEPS: TourStep[] = [
     {
       title: "Bem-vindo ao Guia",
-      content: "Vamos fazer um tour rápido para você aprender a configurar e utilizar todos os recursos do JW Quiz. Clique em 'Próximo' para começar.",
+      content: "Vamos fazer um tour rápido para você aprender a configurar e utilizar todos os recursos do Avalia JW Quiz. Clique em 'Próximo' para começar.",
       position: 'center'
     },
     {
@@ -136,7 +136,7 @@ function App() {
     {
       targetId: 'btn-zoom',
       title: "Zoom da Interface",
-      content: "Aumente ou diminua o tamanho dos textos e botões para melhorar a acessibilidade.",
+      content: "Aumente ou diminuu o tamanho dos textos e botões para melhorar a acessibilidade.",
       position: 'bottom'
     },
     {
@@ -1137,7 +1137,7 @@ function App() {
           {/* Left: Logo */}
           <div className="flex items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 opacity-80"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
-            <h1 className="text-base font-semibold tracking-wide truncate">JW Quiz Creator</h1>
+            <h1 className="text-base font-semibold tracking-wide truncate">Aval<span style={{ color: '#F7D33C' }}>ia</span> JW Quiz</h1>
             {isTutorialMode && (
                 <span className="bg-emerald-500 text-white text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ml-2 animate-fade-in shadow-sm hidden md:inline-block">
                     Modo Tutorial
