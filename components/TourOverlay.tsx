@@ -55,8 +55,6 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
             }
             return prev;
           });
-        } else {
-            // Element not found - keep rect null or let it be null from reset
         }
       } else {
         setRect(null); // Center mode
@@ -73,7 +71,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
                 el.scrollIntoView({ behavior: 'auto', block: 'center' });
             }
         }
-    }, 100); // Small delay to allow React to render the new step content
+    }, 100); 
 
     // Start tracking
     requestRef.current = requestAnimationFrame(trackPosition);
@@ -109,17 +107,16 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
   };
 
   // Styles for the highlighter box
-  // We use a massive box-shadow to create the "backdrop" effect around the highlighted element
   const highlightStyle: React.CSSProperties = rect ? {
     top: rect.top - 4,
     left: rect.left - 4,
     width: rect.width + 8,
     height: rect.height + 8,
     position: 'fixed',
-    transition: 'top 0.1s, left 0.1s, width 0.1s, height 0.1s', // Faster transition for tracking
-    boxShadow: '0 0 0 9999px rgba(0,0,0,0.75)', // The mask
-    zIndex: 55, // Below tooltip (60) but above content
-    pointerEvents: 'none' // Let clicks pass through to the element if needed (though overlay usually blocks interaction)
+    transition: 'top 0.1s, left 0.1s, width 0.1s, height 0.1s',
+    boxShadow: '0 0 0 9999px rgba(0,0,0,0.75)', 
+    zIndex: 55, 
+    pointerEvents: 'none'
   } : {};
 
   // Styles for the tooltip
@@ -128,7 +125,7 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
     top: currentStep.position === 'top' ? rect.top - 10 : (rect.bottom + 10),
     left: rect.left + (rect.width / 2),
     transform: currentStep.position === 'top' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
-    transition: 'top 0.1s, left 0.1s', // Faster transition
+    transition: 'top 0.1s, left 0.1s', 
     zIndex: 60
   } : {
     position: 'fixed',
@@ -152,12 +149,6 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden pointer-events-auto">
-      {/* 
-         Backdrop logic:
-         1. If rect exists (Highlight Mode): We DO NOT render a full screen backdrop div. 
-            Instead, the 'highlightStyle' box-shadow creates the dimming effect.
-         2. If rect is null (Center Message Mode): We render a full backdrop div.
-      */}
       {!rect && (
         <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] transition-opacity duration-300"></div>
       )}
@@ -199,13 +190,13 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
                     onClick={onClose} 
                     className="text-sm px-3 py-1 opacity-60 hover:opacity-100 hover:text-red-400 transition-colors"
                 >
-                    Pular
+                    Pular Tour
                 </button>
                 <button 
                     onClick={handleNext}
                     className="bg-jw-blue text-white px-6 py-2 rounded-full font-bold text-sm shadow-lg hover:scale-105 transition-transform"
                 >
-                    {currentStepIndex === steps.length - 1 ? 'Vamos lá!' : 'Próximo'}
+                    {currentStepIndex === steps.length - 1 ? 'COMEÇAR!' : 'Avançar'}
                 </button>
             </div>
         </div>
@@ -215,8 +206,8 @@ export const TourOverlay: React.FC<TourOverlayProps> = ({ steps, isOpen, onClose
             <div 
                 className={`absolute w-4 h-4 bg-jw-card border-l border-t border-jw-blue transform rotate-45 ${
                     (tooltipStyle.transform as string).includes('-100%') 
-                    ? '-bottom-2 left-1/2 -ml-2 border-l-0 border-t-0 border-r border-b' // Arrow pointing down
-                    : '-top-2 left-1/2 -ml-2' // Arrow pointing up
+                    ? '-bottom-2 left-1/2 -ml-2 border-l-0 border-t-0 border-r border-b' 
+                    : '-top-2 left-1/2 -ml-2' 
                 }`}
             ></div>
         )}

@@ -1,4 +1,3 @@
-
 import { Difficulty, TopicMode, HintType, QuizFormat, GeneratedQuiz, QuizConfig } from './types';
 
 export const BIBLE_BOOKS = [
@@ -105,7 +104,7 @@ export const TUTORIAL_CONFIG: QuizConfig = {
 };
 
 export const TUTORIAL_DATA: GeneratedQuiz = {
-  title: "Tutorial Interativo: Aprenda a Jogar",
+  title: "Modo Treinamento: Comece o Jogo",
   questions: [
     {
       id: "tut-1",
@@ -131,7 +130,7 @@ export const TUTORIAL_DATA: GeneratedQuiz = {
       correctAnswerIndex: 0,
       reference: "Recursos do App",
       hint: "Parabéns! Você encontrou a dica. A resposta é 'Verdadeiro'.",
-      explanation: "O sistema de dicas consome seus 'créditos de dica' disponíveis. Use com sabedoria! Além da Dica Padrão, você pode perguntar ao Chat IA."
+      explanation: "Cada ajuda utilizada consome um uso do seu limite. Use com sabedoria! Além da Dica Padrão, você pode perguntar ao Chat IA."
     },
     {
       id: "tut-3",

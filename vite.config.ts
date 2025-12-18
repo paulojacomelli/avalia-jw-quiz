@@ -11,8 +11,8 @@ export default defineConfig({
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'Avalia JW Quiz',
-        short_name: 'Avalia JW',
-        description: 'Teste seus conhecimentos teocráticos com IA',
+        short_name: 'Avalia JW Quiz',
+        description: 'Desafie seus conhecimentos bíblicos com IA',
         theme_color: '#5b3c88',
         background_color: '#121212',
         display: 'standalone',

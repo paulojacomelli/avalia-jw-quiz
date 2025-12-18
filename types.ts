@@ -1,5 +1,4 @@
 
-
 export enum Difficulty {
   EASY = 'Fácil',
   MEDIUM = 'Médio',
@@ -78,11 +77,15 @@ export interface QuizConfig {
 
   // TTS
   tts: TTSConfig;
+
+  // History tracking
+  usedTopics?: string[];
 }
 
 export interface GeneratedQuiz {
   title: string;
   questions: QuizQuestion[];
+  focalTheme?: string; // Tracks which instruction from HIDDEN_THEMES was used
 }
 
 export interface EvaluationResult {

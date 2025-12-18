@@ -330,7 +330,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
           )}
           {showAnswerKey && !isMultipleChoice && (
              <div className="mt-2 text-sm text-green-300 bg-green-900/20 p-2 rounded">
-                <strong>Gabarito:</strong> {question.correctAnswerText}
+                <strong>Solução Oficial:</strong> {question.correctAnswerText}
              </div>
           )}
         </div>
@@ -377,77 +377,77 @@ export const QuizCard: React.FC<QuizCardProps> = ({
             </div>
             {!isAnsweredOrFinished && internalSelectedOption !== null && (
               <div className="flex justify-end animate-fade-in-up pt-2">
-                 <button 
-                   onClick={handleConfirm}
-                   className="bg-jw-blue text-white font-bold py-3 px-8 rounded-full shadow-lg hover:bg-opacity-90 transition-transform active:scale-95 flex items-center gap-2"
-                   onMouseEnter={() => playSound('hover')}
-                 >
-                   Confirmar Resposta
-                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                 </button>
+                  <button 
+                    onClick={handleConfirm}
+                    className="bg-jw-blue text-white font-bold py-3 px-8 rounded-full shadow-lg hover:bg-opacity-90 transition-transform active:scale-95 flex items-center gap-2"
+                    onMouseEnter={() => playSound('hover')}
+                  >
+                    Confirmar Resposta
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                  </button>
               </div>
             )}
           </div>
         ) : (
           <div className="space-y-4 animate-fade-in">
-             {!evaluationResult && !showAnswerKey ? (
-               <>
-                   <div className="relative animate-fade-in">
-                     <textarea 
-                       value={textAnswer}
-                       onChange={(e) => setTextAnswer(e.target.value)}
-                       placeholder="Digite sua resposta aqui..."
-                       className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
-                       disabled={isEvaluating || isTimeUp || isSkipping}
-                       autoFocus
-                     />
-                     <button 
-                       onClick={toggleRecording}
-                       className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
-                       title="Falar resposta (Ditado)"
-                       disabled={isEvaluating || isTimeUp || isSkipping}
-                     >
-                       <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                       </svg>
-                     </button>
-                   </div>
-                 
-                    <div className="flex justify-end mt-4">
-                        <button 
-                        onClick={handleSubmitFreeResponse}
-                        disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
-                        className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                        {isEvaluating ? (
-                            <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Avaliando...
-                            </>
-                        ) : 'Confirmar e Enviar'}
-                        </button>
+              {!evaluationResult && !showAnswerKey ? (
+                <>
+                    <div className="relative animate-fade-in">
+                      <textarea 
+                        value={textAnswer}
+                        onChange={(e) => setTextAnswer(e.target.value)}
+                        placeholder="Digite sua resposta aqui..."
+                        className="w-full h-32 md:h-40 bg-jw-hover border border-gray-600 rounded-lg p-4 text-sm md:text-base focus:ring-2 focus:ring-jw-blue outline-none resize-none"
+                        disabled={isEvaluating || isTimeUp || isSkipping}
+                        autoFocus
+                      />
+                      <button 
+                        onClick={toggleRecording}
+                        className={`absolute bottom-4 right-4 p-2 rounded-full transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-jw-card text-gray-400 hover:text-jw-blue'}`}
+                        title="Falar resposta (Ditado)"
+                        disabled={isEvaluating || isTimeUp || isSkipping}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill={isRecording ? "currentColor" : "none"} viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                        </svg>
+                      </button>
                     </div>
-               </>
-             ) : (
-               <div className="bg-jw-card p-4 md:p-6 rounded-lg border border-gray-700">
-                  <div className="text-sm opacity-60 mb-2">Sua resposta:</div>
-                  <div className="mb-4 italic">"{textAnswer || (forceSelectedOption as any)}"</div>
-                  {evaluationResult && (
-                    <div className={`p-4 rounded border ${evaluationResult.score > 0.6 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-bold">{evaluationResult.score > 0.6 ? 'Correto' : 'Incorreto'}</span>
-                        <span className="text-sm font-mono bg-black/30 px-2 py-1 rounded">Nota: {(evaluationResult.score * 100).toFixed(0)}%</span>
-                      </div>
-                      <p className="text-sm">{evaluationResult.feedback}</p>
-                    </div>
-                  )}
-                  {showAnswerKey && (
-                     <div className="mt-4 pt-4 border-t border-gray-700/50 text-sm">
-                        <span className="font-bold text-jw-blue">Gabarito esperado:</span> {question.correctAnswerText}
+                  
+                     <div className="flex justify-end mt-4">
+                         <button 
+                         onClick={handleSubmitFreeResponse}
+                         disabled={!textAnswer.trim() || isEvaluating || isTimeUp || isSkipping}
+                         className="px-6 py-2 bg-jw-blue text-white rounded-lg font-bold hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                         >
+                         {isEvaluating ? (
+                             <>
+                             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                             Avaliando...
+                             </>
+                         ) : 'Confirmar e Enviar'}
+                         </button>
                      </div>
-                  )}
-               </div>
-             )}
+                </>
+              ) : (
+                <div className="bg-jw-card p-4 md:p-6 rounded-lg border border-gray-700">
+                   <div className="text-sm opacity-60 mb-2">Sua resposta:</div>
+                   <div className="mb-4 italic">"{textAnswer || (forceSelectedOption as any)}"</div>
+                   {evaluationResult && (
+                     <div className={`p-4 rounded border ${evaluationResult.score > 0.6 ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}>
+                       <div className="flex justify-between items-center mb-2">
+                         <span className="font-bold">{evaluationResult.score > 0.6 ? 'Correto' : 'Incorreto'}</span>
+                         <span className="text-sm font-mono bg-black/30 px-2 py-1 rounded">Nota: {(evaluationResult.score * 100).toFixed(0)}%</span>
+                       </div>
+                       <p className="text-sm">{evaluationResult.feedback}</p>
+                     </div>
+                   )}
+                   {showAnswerKey && (
+                      <div className="mt-4 pt-4 border-t border-gray-700/50 text-sm">
+                         <span className="font-bold text-jw-blue">Solução Oficial:</span> {question.correctAnswerText}
+                      </div>
+                   )}
+                </div>
+              )}
           </div>
         )}
       </div>
@@ -462,8 +462,8 @@ export const QuizCard: React.FC<QuizCardProps> = ({
            )}
            {question.explanation && (
               <div className="bg-jw-hover/50 p-4 rounded-lg border-l-4 border-jw-blue text-sm leading-relaxed text-jw-text opacity-90">
-                 <strong className="block text-xs uppercase tracking-wider opacity-60 mb-1">Por que?</strong>
-                 {question.explanation}
+                  <strong className="block text-xs uppercase tracking-wider opacity-60 mb-1">Por que?</strong>
+                  {question.explanation}
               </div>
            )}
            <div className="flex gap-2">
@@ -570,7 +570,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({
             </button>
             <div className="font-bold text-sm mb-2 text-jw-blue flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
-              Chat com Instrutor Virtual
+              Chat com Mestre de Quiz
             </div>
             {!askResponse ? (
               <form onSubmit={handleSubmitAskAi} className="flex gap-2">

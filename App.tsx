@@ -4,7 +4,7 @@ import { QuizCard } from './components/QuizCard';
 import { LoginScreen } from './components/LoginScreen';
 import { useAuth } from './contexts/AuthContext';
 import { generateQuizContent, generateReplacementQuestion, preGenerateQuizAudio } from './services/geminiService';
-import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig } from './types';
+import { GeneratedQuiz, QuizConfig, Team, HintType, Difficulty, TTSConfig, TopicMode } from './types';
 import { playSound, playTimerTick, setGlobalSoundState, playCountdownTick, playGoSound, startLoadingDrone, stopLoadingDrone, resumeAudioContext } from './utils/audio';
 import { speakText, stopSpeech, getQuestionReadAloudText } from './utils/tts';
 import { LOADING_MESSAGES, TUTORIAL_CONFIG, TUTORIAL_DATA } from './constants';
@@ -40,6 +40,9 @@ function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(1.0); 
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Focal History State (Labels from HIDDEN_THEMES)
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
 
   // TTS Global State
   const [ttsEnabled, setTtsEnabled] = useState(false); 
@@ -103,7 +106,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState("");
 
   // Confirmation Modal State
-  const [pendingAction, setPendingAction] = useState<'RESET' | 'LOGOUT' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'RESET' | 'LOGOUT' | 'CLEAR_HISTORY' | null>(null);
 
   // Audio/TTS Refs
   const questionReadRef = useRef(false);
@@ -112,7 +115,7 @@ function App() {
   const TOUR_STEPS: TourStep[] = [
     {
       title: "Bem-vindo ao Guia",
-      content: "Vamos fazer um tour rápido para você aprender a configurar e utilizar todos os recursos do Avalia JW Quiz. Clique em 'Próximo' para começar.",
+      content: "Vamos fazer um tour rápido para você aprender a configurar e utilizar todos os recursos do Avalia JW Quiz.",
       position: 'center'
     },
     {
@@ -130,19 +133,7 @@ function App() {
     {
       targetId: 'btn-tts',
       title: "Narração (TTS)",
-      content: "Escolha entre 'Voz Clássica' (navegador) ou 'Voz Natural' (IA) para ler as perguntas automaticamente. Você também pode desativar a leitura.",
-      position: 'bottom'
-    },
-    {
-      targetId: 'btn-zoom',
-      title: "Zoom da Interface",
-      content: "Aumente ou diminuu o tamanho dos textos e botões para melhorar a acessibilidade.",
-      position: 'bottom'
-    },
-    {
-      targetId: 'btn-fullscreen',
-      title: "Tela Cheia",
-      content: "Entre em modo imersivo para evitar distrações durante o quiz.",
+      content: "Escolha entre 'Voz Clássica' ou 'Voz Natural' para ler as perguntas automaticamente.",
       position: 'bottom'
     },
     {
@@ -151,69 +142,16 @@ function App() {
       content: "Volte para a tela inicial a qualquer momento para configurar um novo jogo.",
       position: 'bottom'
     },
-    // Setup - Tab 1
     {
       targetId: 'field-mode',
-      title: "Passo 1: Tema",
-      content: "Escolha o escopo do seu quiz. 'Geral' abrange tópicos variados. 'Livros' foca em um livro bíblico específico. 'Assunto Específico' permite que você digite qualquer tema teocrático.",
+      title: "Passo 1: Tema da Partida",
+      content: "Escolha o tema. Agora o sistema mantém um histórico dos Temas de Quiz limpos para evitar repetições!",
       position: 'top',
       onEnter: () => setSetupStep(1)
     },
     {
-      targetId: 'field-difficulty',
-      title: "Dificuldade",
-      content: "Ajuste a profundidade das perguntas. 'Difícil' tende a pedir detalhes mais específicos e raciocínios doutrinários.",
-      position: 'top'
-    },
-    {
-      targetId: 'field-temperature',
-      title: "Criatividade",
-      content: "Define o nível de variedade. 'Conservador' segue padrões mais previsíveis. 'Criativo' gera perguntas mais inesperadas e variadas.",
-      position: 'top'
-    },
-    {
-      targetId: 'field-format',
-      title: "Formato",
-      content: "Escolha entre Múltipla Escolha, Verdadeiro/Falso ou Resposta Livre (onde você escreve e a IA avalia).",
-      position: 'top'
-    },
-    // Setup - Tab 2
-    {
-      targetId: 'field-team-mode',
-      title: "Passo 2: Modo Competição",
-      content: "Ative para adicionar times e manter um placar separado. Ótimo para Adoração em Família.",
-      position: 'top',
-      onEnter: () => setSetupStep(2)
-    },
-    {
-      targetId: 'field-count',
-      title: "Quantidade",
-      content: "Defina quantas perguntas terá o quiz. Se estiver em times, você pode definir também quantas perguntas ocorrem por rodada.",
-      position: 'top'
-    },
-    {
-      targetId: 'field-timer',
-      title: "Temporizador",
-      content: "Adicione pressão de tempo para deixar o jogo mais dinâmico.",
-      position: 'top'
-    },
-    // Setup - Tab 3
-    {
-      targetId: 'setup-form-container', 
-      title: "Passo 3: Ajudas",
-      content: "Configure quantas dicas podem ser usadas. 'Dica do Sistema' mostra uma pista simples. 'Perguntar ao Chat' permite conversar com a IA para tirar dúvidas.",
-      position: 'top',
-      onEnter: () => setSetupStep(3)
-    },
-    {
-      title: "Ações Especiais & Contestar",
-      content: "Às vezes a IA erra! Na última pergunta deste Tutorial, colocamos um erro de propósito. Quando chegar na tela de placar final, clique em 'Revisar Respostas' e use o botão 'Contestar' para corrigir a pergunta ruim.",
-      position: 'center',
-      onEnter: () => setSetupStep(1) // Reset form visual state
-    },
-    {
       title: "Vamos Praticar!",
-      content: "Agora que você conhece a interface, vamos iniciar um Modo Tutorial rápido para você jogar uma partida de teste. Clique em 'Vamos lá' para começar.",
+      content: "Agora vamos iniciar um Modo Tutorial rápido para você jogar uma partida de teste.",
       position: 'center'
     }
   ];
@@ -225,12 +163,21 @@ function App() {
     const savedSound = localStorage.getItem('jw-quiz-sound');
     const savedTTS = localStorage.getItem('jw-quiz-tts');
     const savedEngine = localStorage.getItem('jw-quiz-tts-engine');
+    const savedFocalHistory = localStorage.getItem('jw-quiz-used-hidden-themes');
     
     if (savedTheme) setTheme(savedTheme);
     if (savedSound !== null) {
       const isEnabled = savedSound === 'true';
       setSoundEnabled(isEnabled);
       setGlobalSoundState(isEnabled);
+    }
+
+    if (savedFocalHistory) {
+      try {
+        setUsedTopics(JSON.parse(savedFocalHistory));
+      } catch (e) {
+        setUsedTopics([]);
+      }
     }
     
     // Restore TTS Settings
@@ -497,7 +444,7 @@ function App() {
         // Setup Dummy Team
         setTeams([{
             id: 'solo',
-            name: 'Aluno',
+            name: 'Você',
             color: '#10b981', // Tutorial green
             score: 0,
             correctCount: 0,
@@ -616,9 +563,11 @@ function App() {
     }
 
     // INJECT THE GLOBAL TTS CONFIG INTO THE QUIZ CONFIG
-    const finalConfig = {
+    // Include the usedTopics in the config passed to the service
+    const finalConfig: QuizConfig = {
       ...config,
-      tts: ttsConfig
+      tts: ttsConfig,
+      usedTopics: usedTopics
     };
 
     setQuizConfig(finalConfig);
@@ -662,12 +611,27 @@ function App() {
       }
 
       setQuizData(data);
+
+      // --- Update Focal History (Labels from Hidden Themes) ---
+      if (data.focalTheme) {
+          const newUsed = [data.focalTheme, ...usedTopics].slice(0, 20); // Keep last 20 labels
+          setUsedTopics(newUsed);
+          localStorage.setItem('jw-quiz-used-hidden-themes', JSON.stringify(newUsed));
+      }
+
       setGameState('READY_CHECK');
     } catch (err: any) {
       handleApiError(err);
     } finally {
       setLoading(false); 
     }
+  };
+
+  const handleClearHistory = () => {
+    setUsedTopics([]);
+    localStorage.removeItem('jw-quiz-used-hidden-themes');
+    setPendingAction(null);
+    playSound('click');
   };
 
   const handleRestartSameSettings = () => {
@@ -1042,7 +1006,7 @@ function App() {
                {/* Spinning indicator */}
                <div className="w-16 h-16 md:w-20 md:h-20 border-[6px] border-t-jw-blue border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin absolute top-0 left-0"></div>
             </div>
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-300 mb-6 tracking-wide">Preparando seu Quiz...</h2>
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-300 mb-6 tracking-wide">Carregando Partida...</h2>
             <p className="text-gray-400 text-sm md:text-base max-w-lg italic font-serif opacity-80 leading-relaxed animate-pulse">
                "{loadingMessage}"
             </p>
@@ -1052,37 +1016,36 @@ function App() {
       {/* CONFIRMATION MODAL */}
       {pendingAction && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-jw-card max-w-sm w-full rounded-2xl shadow-2xl border border-gray-600/50 overflow-hidden transform transition-all scale-100">
-                <div className="p-6">
-                    <div className="flex flex-col items-center text-center mb-6">
-                        <div className={`p-4 rounded-full mb-4 ${pendingAction === 'LOGOUT' ? 'bg-red-500/10 text-red-400' : 'bg-yellow-500/10 text-yellow-400'}`}>
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                            </svg>
-                        </div>
-                        <h3 className="text-xl font-bold text-jw-text mb-2">
-                            {pendingAction === 'LOGOUT' ? 'Sair do Aplicativo?' : 'Reiniciar Quiz?'}
-                        </h3>
-                        <p className="text-sm opacity-70 leading-relaxed">
-                            {pendingAction === 'LOGOUT' 
-                                ? 'Deseja realmente sair e remover a chave de API deste dispositivo? Você precisará inseri-la novamente.' 
-                                : 'Todo o progresso do jogo atual será perdido e você voltará para a tela inicial.'}
-                        </p>
-                    </div>
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={cancelPendingAction}
-                            className="flex-1 py-3 bg-jw-hover text-jw-text rounded-lg font-medium hover:bg-opacity-80 transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={pendingAction === 'LOGOUT' ? executeLogout : executeReset}
-                            className={`flex-1 py-3 text-white rounded-lg font-bold shadow-lg hover:bg-opacity-90 transition-colors ${pendingAction === 'LOGOUT' ? 'bg-red-600' : 'bg-jw-blue'}`}
-                        >
-                            Confirmar
-                        </button>
-                    </div>
+            <div className="bg-jw-card max-w-sm w-full rounded-2xl shadow-2xl border border-gray-700 overflow-hidden transform transition-all scale-100 p-6">
+                <div className="flex flex-col items-center text-center mb-6">
+                    <h3 className="text-xl font-bold text-jw-text mb-2">
+                        {pendingAction === 'LOGOUT' ? 'Sair do Aplicativo?' : 
+                         pendingAction === 'RESET' ? 'Reiniciar Quiz?' : 
+                         'Limpar Histórico?'}
+                    </h3>
+                    <p className="text-sm opacity-70 leading-relaxed">
+                        {pendingAction === 'LOGOUT' 
+                            ? 'Deseja realmente sair? Você precisará inserir sua chave novamente.' 
+                            : pendingAction === 'RESET' 
+                            ? 'Todo o progresso do jogo atual será perdido.'
+                            : 'Isso limpará o histórico de focos temáticos usados recentemente.'}
+                    </p>
+                </div>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={cancelPendingAction}
+                        className="flex-1 py-3 bg-jw-hover text-jw-text rounded-lg font-medium hover:bg-opacity-80 transition-colors"
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        onClick={pendingAction === 'LOGOUT' ? executeLogout : 
+                                 pendingAction === 'RESET' ? executeReset : 
+                                 handleClearHistory}
+                        className={`flex-1 py-3 text-white rounded-lg font-bold shadow-lg hover:bg-opacity-90 transition-colors ${pendingAction === 'LOGOUT' ? 'bg-red-600' : 'bg-jw-blue'}`}
+                    >
+                        Confirmar
+                    </button>
                 </div>
             </div>
         </div>
@@ -1359,13 +1322,41 @@ function App() {
                    <h2 className="text-3xl md:text-4xl font-bold text-jw-text mb-4 tracking-tight">Teste seu Conhecimento</h2>
                    <p className="text-sm md:text-lg opacity-70">Selecione os parâmetros abaixo para gerar um quiz personalizado.</p>
                  </div>
-                 <SetupForm 
-                    onGenerate={handleGenerate} 
-                    isLoading={loading} 
-                    ttsEnabled={ttsEnabled}
-                    forcedStep={setupStep} // FIXED: Always pass setupStep
-                    onStepChange={(step) => setSetupStep(step)} // Sync state
-                 />
+                 
+                 <div className="w-full max-w-2xl space-y-6">
+                    <SetupForm 
+                        onGenerate={handleGenerate} 
+                        isLoading={loading} 
+                        ttsEnabled={ttsEnabled}
+                        forcedStep={setupStep} // FIXED: Always pass setupStep
+                        onStepChange={(step) => setSetupStep(step)} // Sync state
+                    />
+
+                    {/* FOCAL HIDDEN THEMES HISTORY LIST */}
+                    {usedTopics.length > 0 && (
+                        <div className="bg-jw-card/50 p-6 rounded-xl border border-gray-700/30 animate-fade-in-up">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">Temas de Quiz Recentemente Explorados</h3>
+                                <button 
+                                    onClick={() => setPendingAction('CLEAR_HISTORY')}
+                                    className="text-[10px] text-red-400 hover:text-red-300 font-bold uppercase tracking-wider underline underline-offset-4"
+                                >
+                                    Limpar Histórico
+                                </button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {usedTopics.map((topic, i) => (
+                                    <span key={i} className="bg-jw-hover px-3 py-1.5 rounded-lg text-xs border border-gray-700/50 opacity-80">
+                                        {topic}
+                                    </span>
+                                ))}
+                            </div>
+                            <p className="text-[10px] opacity-40 italic mt-4">
+                                * O JW Quiz rotaciona automaticamente estas instruções internas para garantir que você sempre aprenda algo novo e variado.
+                            </p>
+                        </div>
+                    )}
+                 </div>
               </div>
             )}
 
@@ -1497,7 +1488,7 @@ function App() {
                                 <div className="space-y-1 text-sm opacity-70">
                                    <p>Acertos: {t.correctCount}</p>
                                    <p>Erros: {t.wrongCount}</p>
-                                   <p>Dicas usadas: {t.hintsUsed}</p>
+                                   <p>Power-ups usados: {t.hintsUsed}</p>
                                    <p>Aproveitamento: {Math.round((t.correctCount / (t.correctCount + t.wrongCount || 1)) * 100)}%</p>
                                 </div>
                              </div>
@@ -1550,7 +1541,7 @@ function App() {
           <footer className="w-full shrink-0 py-6 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity flex flex-col gap-1 pb-24 md:pb-12">
             <button onClick={handleLogoutRequest} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
             <div className="flex flex-col gap-0.5">
-              <span>Versão: 1.0.5 Beta</span>
+              <span>Versão: 1.0.8 Beta</span>
               <span>
                 Copyright © <a href="https://www.paulojacomelli.com.br" target="_blank" rel="noopener noreferrer" className="hover:text-jw-blue underline">Paulo Jacomelli</a> 2025
               </span>

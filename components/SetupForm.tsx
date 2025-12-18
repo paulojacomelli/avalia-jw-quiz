@@ -163,7 +163,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
       <div className="mb-8">
         <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-2 text-gray-500">
           <span className={currentStep >= 1 ? 'text-jw-blue' : ''}>1. Conteúdo</span>
-          <span className={currentStep >= 2 ? 'text-jw-blue' : ''}>2. Estrutura</span>
+          <span className={currentStep >= 2 ? 'text-jw-blue' : ''}>2. Configurações</span>
           <span className={currentStep >= 3 ? 'text-jw-blue' : ''}>3. Ajudas</span>
         </div>
         <div className="h-2 w-full bg-gray-300 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -181,7 +181,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
           <div className="space-y-6 animate-fade-in">
             {/* Mode */}
             <div id="field-mode">
-              <label className="block text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Sobre o que será o Quiz?</label>
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-200 mb-2">Escolha o seu Tema</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {MODE_OPTIONS.map((opt) => (
                   <button
@@ -287,7 +287,7 @@ export const SetupForm: React.FC<SetupFormProps> = ({
           </div>
         )}
 
-        {/* STEP 2: ESTRUTURA */}
+        {/* STEP 2: CONFIGURAÇÕES */}
         {currentStep === 2 && (
           <div className="space-y-6 animate-fade-in">
             {/* Team Mode Toggle */}
