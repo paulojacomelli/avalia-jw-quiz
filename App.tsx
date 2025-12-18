@@ -1550,7 +1550,7 @@ function App() {
           <footer className="w-full shrink-0 py-6 text-center text-[10px] opacity-40 hover:opacity-100 transition-opacity flex flex-col gap-1 pb-24 md:pb-12">
             <button onClick={handleLogoutRequest} className="hover:text-red-400 underline">Alterar Chave API / Sair</button>
             <div className="flex flex-col gap-0.5">
-              <span>Versão: 1.0.4 Beta</span>
+              <span>Versão: 1.0.5 Beta</span>
               <span>
                 Copyright © <a href="https://www.paulojacomelli.com.br" target="_blank" rel="noopener noreferrer" className="hover:text-jw-blue underline">Paulo Jacomelli</a> 2025
               </span>

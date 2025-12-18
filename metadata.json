@@ -1,5 +1,5 @@
 {
-  "name": "Avalia JW Quiz",
+  "name": "Avalia JW Quiz 1.0.5 Beta",
   "description": "A specialized application to generate Bible quizzes based strictly on NWT and JW.org publications, featuring a clean card-based design.",
   "requestFramePermissions": [
     "microphone"
