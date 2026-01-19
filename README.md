@@ -1,31 +1,32 @@
 
-# Avalia Quiz & Avalia JW Quiz - Guia para Desenvolvedores
+# Avalia JW Quiz - Quizzes Bíblicos e Teocráticos
 
-Bem-vindo ao repositório do projeto **Avalia**. Este repositório contém dois aplicativos React independentes, mas estruturalmente similares, focados em gerar quizzes educacionais utilizando Inteligência Artificial (Google Gemini).
+Bem-vindo ao repositório do **Avalia JW Quiz**. Este é um aplicativo React focado em auxiliar no estudo bíblico e teocrático através de quizzes gerados por Inteligência Artificial (Google Gemini). Ideal para e Noite de Adoração em Família ou estudo pessoal.
 
--   📂 **`avalia-quiz`**: Versão para conhecimentos gerais (Acadêmico, Entretenimento, etc.).
--   📂 **`avalia-jw-quiz`**: Versão temática bíblica e teocrática.
+## 🌟 Funcionalidades
+
+-   **Temas Teocráticos:** Gere perguntas sobre personagens bíblicos, livros da Bíblia, história moderna e mais.
+-   **Respeito ao Contexto:** A IA é instruída para gerar perguntas baseadas em fatos bíblicos.
+-   **Modo Estudo:** Aprenda com explicações detalhadas para cada resposta.
+-   **Biblioteca de Estudo:** Compartilhe seus quizzes com a congregação ou amigos (via Firebase).
 
 ---
 
-## 🚀 Guia de Implementação e Instalação (Passo a Passo)
+## 🚀 Guia de Implementação e Instalação
 
-Siga este guia para configurar o ambiente de desenvolvimento, obter suas credenciais e rodar os projetos na sua máquina.
+Siga este guia para configurar o projeto na sua máquina.
 
 ### 1. Pré-requisitos
-Certifique-se de ter instalado em sua máquina:
-*   [Node.js](https://nodejs.org/) (versão 18 ou superior recomendada).
-*   Um editor de código (como o [VS Code](https://code.visualstudio.com/)).
-*   Uma conta no Google (para acessar o Google AI Studio e Firebase).
+*   [Node.js](https://nodejs.org/) (v18+).
+*   Editor de código (ex: VS Code).
+*   Conta Google (para API Gemini e Firebase).
 
-### 2. Clonar e Instalar Dependências
-
-Abra seu terminal e rode os comandos:
+### 2. Clonar e Instalar
 
 ```bash
 # Clone o repositório
-git clone https://github.com/SEU_USUARIO/avalia.git
-cd avalia
+git clone https://github.com/paulojacomelli/avalia-jw-quiz.git
+cd avalia-jw-quiz
 
 # Instale as dependências
 npm install
@@ -33,97 +34,48 @@ npm install
 
 ---
 
-## 🔑 Como Obter as Credenciais (API Keys)
+## 🔑 Configuração das Credenciais
 
-Para que o aplicativo funcione, você precisará de duas configurações principais: **Google Gemini API** (para gerar as perguntas) e **Firebase** (para salvar e compartilhar quizzes).
+O app precisa de duas chaves para funcionar: **Google Gemini** (Cérebro do IA) e **Firebase** (Banco de Dados).
 
 ### A. Google Gemini API Key 🧠
-A "inteligência" do app vem do modelo Gemini.
-
 1.  Acesse o [Google AI Studio](https://aistudio.google.com/).
-2.  Faça login com sua conta Google.
-3.  Clique no botão **"Get API key"** (no canto superior esquerdo ou menu).
-4.  Clique em **"Create API key"**.
-5.  Selecione um projeto existente ou crie um novo no Google Cloud console quando solicitado.
-6.  Copie a chave gerada (começa com `AIza...`).
-7.  **Guarde essa chave**, você a usará no arquivo `.env.local`.
+2.  Clique em **"Get API key"** > **"Create API key"**.
+3.  Copie a chave gerada (inicia com `AIza...`).
 
 ### B. Credenciais do Firebase 🔥
-O Firebase é usado como banco de dados para salvar os quizzes gerados e permitir o modo "Biblioteca da Comunidade".
-
 1.  Acesse o [Console do Firebase](https://console.firebase.google.com/).
-2.  Clique em **"Adicionar projeto"** e dê um nome (ex: `meu-avalia-quiz`).
-3.  Desative o Google Analytics (opcional, simplifica a criação) e clique em **"Criar projeto"**.
-4.  **Configurar o Web App:**
-    *   No painel do projeto, clique no ícone de **Web** `</>` (logo abaixo do nome do projeto).
-    *   Dê um apelido para o app e clique em **"Registrar app"**.
-    *   O Firebase mostrará um código com `firebaseConfig`. **COPIE os valores** dentro desse objeto (apiKey, authDomain, projectId, etc.). Você precisará deles em breve.
-5.  **Configurar o Firestore (Banco de Dados):**
-    *   No menu lateral esquerdo, vá em **Criação > Firestore Database**.
-    *   Clique em **"Criar banco de dados"**.
-    *   Escolha um local (ex: `nam5 (us-central)` ou `sao-paulo`).
-    *   **Importante:** Comece no **modo de teste** (permite leitura/escrita por 30 dias) ou configure as regras de segurança apropriadas para produção.
+2.  Crie um novo projeto.
+3.  Adicione um **Web App** `</>` para obter o `firebaseConfig`.
+4.  Ative o **Firestore Database** em modo de teste.
 
 ---
 
-## ⚙️ Configuração do Ambiente (.env)
+## ⚙️ Configuração do Ambiente
 
-Agora que você tem as chaves, vamos configurar o projeto.
-
-1.  Na pasta do projeto que deseja rodar (ex: `avalia-quiz` ou `avalia-jw-quiz`), localize o arquivo `.env.example`.
-2.  Duplique este arquivo e renomeie a cópia para `.env.local`.
-    *   *Nota: O arquivo `.env.local` é ignorado pelo Git para não expor suas senhas.*
-3.  Abra o `.env.local` e preencha com suas credenciais:
+1.  Renomeie o arquivo `.env.example` para `.env.local`.
+2.  Preencha com suas chaves:
 
 ```env
-# Sua chave do Google AI Studio
-GEMINI_API_KEY=AIzaSy...SuaChaveAqui...
-
-# Suas credenciais do Console do Firebase
-VITE_FIREBASE_API_KEY=AIzaSy...SuaChaveFirebase...
-VITE_FIREBASE_AUTH_DOMAIN=seu-projeto.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=sku-projeto
-VITE_FIREBASE_STORAGE_BUCKET=seu-projeto.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
-VITE_FIREBASE_APP_ID=1:123456...
-VITE_FIREBASE_MEASUREMENT_ID=G-XYZ...
+GEMINI_API_KEY=SuaChaveGeminiAqui
+VITE_FIREBASE_API_KEY=SuaChaveFirebase
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+# ... demais configurações do Firebase
 ```
 
 ---
 
 ## ▶️ Rodando o Projeto
 
-Com tudo configurado, basta iniciar o servidor de desenvolvimento:
-
 ```bash
-# Para rodar o Avalia Quiz (Geral)
-cd avalia-quiz
-npm run dev
-
-# Para rodar o Avalia JW Quiz (Bíblico)
-cd avalia-jw-quiz
 npm run dev
 ```
-
-O terminal mostrará um link (geralmente `http://localhost:5173` ou similar). Clique para abrir no seu navegador.
-
----
-
-## 📦 Build para Produção
-
-Se quiser hospedar o site na internet (Vercel, Netlify, etc.):
-
-1.  Execute:
-    ```bash
-    npm run build
-    ```
-2.  Isso criará uma pasta `dist` com os arquivos otimizados.
-3.  Faça o deploy dessa pasta `dist`. Lembre-se de configurar as mesmas **Variáveis de Ambiente** no painel do seu serviço de hospedagem (Vercel/Netlify), copiando os valores do seu `.env.local`.
+Acesse `http://localhost:5173`.
 
 ---
 
 ## 📜 Licença
 
-Este projeto é distribuído sob a licença **GPLv3**. Consulte o arquivo [LICENSE](./LICENSE) para mais detalhes.
-
-Isso significa que você é livre para usar, estudar, compartilhar e modificar o software, desde que as versões modificadas também sejam livres e open source sob a mesma licença.
+Este projeto é distribuído sob a licença **GPLv3**.
+Você é livre para usar, estudar e modificar o software, mantendo-o open source.
