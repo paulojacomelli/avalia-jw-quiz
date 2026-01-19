@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Avalia JW Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      
+      /* Light Mode Variables (Default :root) */
+      :root {
+        --bg-main: #f3f4f6; /* Gray-100 */
+        --bg-card: #ffffff; /* White */
+        --bg-hover: #e5e7eb; /* Gray-200 */
+        --text-main: #1f2937; /* Gray-800 */
+        --text-muted: #6b7280; /* Gray-500 */
+        --accent-primary: #5b3c88;
+      }
+
+      /* Dark Mode Variables */
+      .dark {
+        --bg-main: #121212;
+        --bg-card: #1e1e1e;
+        --bg-hover: #2d2d2d;
+        --text-main: #e5e5e5;
+        --text-muted: #9ca3af;
+        --accent-primary: #5b3c88;
+      }
+      
+      body {
+        background-color: var(--bg-main);
+        color: var(--text-main);
+        transition: background-color 0.3s ease, color 0.3s ease;
+      }
+      
+      /* Smooth transitions */
+      .transition-all {
+        transition-property: all;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        transition-duration: 200ms;
+      }
+
+      /* Custom animations */
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.5s ease-out forwards;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class', // Enable manual dark mode via class
+        theme: {
+          extend: {
+            colors: {
+              jw: {
+                blue: 'var(--accent-primary)',
+                dark: 'var(--bg-main)', 
+                card: 'var(--bg-card)',
+                hover: 'var(--bg-hover)',
+                text: 'var(--text-main)',
+                accent: 'var(--accent-primary)',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'Helvetica Neue', 'Arial', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite-plugin-pwa": "https://esm.sh/vite-plugin-pwa@^1.2.0",
+    "vite": "https://esm.sh/vite@^7.3.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-jw-dark text-jw-text font-sans antialiased h-screen flex flex-col overflow-hidden transition-colors duration-300">
+    <div id="root" class="flex-1 flex flex-col h-full"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

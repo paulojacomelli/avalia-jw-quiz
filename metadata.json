@@ -1,0 +1,7 @@
+{
+  "name": "Avalia JW Quiz 1.3.23-beta",
+  "description": "A specialized Bible quiz gaming experience based strictly on NWT and JW.org publications, featuring dynamic theme rotation for gameplay.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
